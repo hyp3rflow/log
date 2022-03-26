@@ -1,8 +1,3 @@
-<<<<<<< HEAD
-[log.hrmm.xyz](https://log.hrmm.xyz)
-
-built w/ [vercel-solutions/nextjs-portfolio-starter](https://github.com/vercel-solutions/nextjs-portfolio-starter)
-=======
 # log
 
 built with Deno + Fresh, deployed on Deno deploy
