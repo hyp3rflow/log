@@ -37,7 +37,6 @@ export const handler: Handlers<Data> = {
     const url = new URL(`../../${entry.path}`, import.meta.url);
     const markdown = await Deno.readTextFile(url);
     const markup = Marked.parse(markdown);
-    console.log(markup);
     const page = { ...entry, markdown, meta: markup.meta as Page["meta"] };
     const resp = ctx.render({ page });
     return resp;

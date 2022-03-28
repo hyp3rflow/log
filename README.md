@@ -18,4 +18,3 @@ adding, removing, or moving an island in the `islands` directory, run:
 ```
 deno task manifest
 ```
->>>>>>> c53d3bd... deno deno deno
