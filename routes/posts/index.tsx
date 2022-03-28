@@ -23,6 +23,12 @@ const timeFormat = new Intl.DateTimeFormat("en-US", {
   day: "numeric",
 });
 
+const postsWithMarkdown = await Promise.all(POSTS.map(async (post) => {
+  const url = new URL(`../../posts/${post.name}`, import.meta.url);
+  const markdown = await Deno.readTextFile(url);
+  return {post, markdown};
+}))
+
 export default function PostsPage() {
   return (
     <>
@@ -39,9 +45,7 @@ export default function PostsPage() {
         class={tw
           `max-w-screen-sm mx-auto mb-8 px(4 sm:6 md:8) flex flex-col gap-8`}
       >
-        {POSTS.map((post) => {
-          const url = new URL(`../../posts/${post.name}`, import.meta.url);
-          const markdown = Deno.readTextFileSync(url);
+        {postsWithMarkdown.map(({post, markdown}) => {
           const meta = Marked.parse(markdown).meta as MarkdownMeta;
           return (
             <a href={`/posts/${post.name}`}>
