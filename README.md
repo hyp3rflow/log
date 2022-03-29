@@ -1,6 +1,6 @@
 # log
 
-built with Deno + Fresh, deployed on Deno deploy!
+built with Deno + Fresh, deployed on Deno deploy~
 
 ### Usage
 
