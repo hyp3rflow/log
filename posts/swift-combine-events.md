@@ -1,7 +1,7 @@
 ---
 title: Swifting
 date: 2022/05/04
-description: asdf
+description: Korean, Swift studying logs
 tag: Swift
 author: You
 ---
