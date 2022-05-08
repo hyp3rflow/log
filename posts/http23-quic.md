@@ -20,3 +20,5 @@ author: You
   - 0-RTT handshake 시점에 데이터를 함께 실어보낼 수 있다. -> 따라서 더 빠른 응답이 가능하다.
     - [TCP Fast Open(TFO)](https://datatracker.ietf.org/doc/html/rfc7413)과 비슷하지만 호환성 측면에서 낫다.
 - [TLS(transport layer security) 1.3](https://datatracker.ietf.org/doc/html/rfc8446)을 사용한다.
+
+[draft-ietf-quic-http-34](https://datatracker.ietf.org/doc/draft-ietf-quic-http/)
