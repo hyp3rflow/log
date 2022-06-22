@@ -38,7 +38,7 @@ function Description() {
       </h2>
       <p class={tw`text-gray-800`}>
         Building internal bespoke toolkits and contributing to open source
-        projects used in Riiid. Previously made design system, testprep, Santa,
+        projects used in Riiid. Previously worked on design system, testprep, Santa (product),
         and productivity utils as Frontend Engineer.
       </p>
       <p class={tw`text-gray-800`}>
