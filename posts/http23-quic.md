@@ -21,4 +21,5 @@ author: You
     - [TCP Fast Open(TFO)](https://datatracker.ietf.org/doc/html/rfc7413)과 비슷하지만 호환성 측면에서 낫다.
 - [TLS(transport layer security) 1.3](https://datatracker.ietf.org/doc/html/rfc8446)을 사용한다.
 
-[draft-ietf-quic-http-34](https://datatracker.ietf.org/doc/draft-ietf-quic-http/)
+[draft-ietf-quic-http-34](https://datatracker.ietf.org/doc/draft-ietf-quic-http/)\
+[cloudflare/what-happens-in-a-tls-handshake](https://www.cloudflare.com/ko-kr/learning/ssl/what-happens-in-a-tls-handshake/)

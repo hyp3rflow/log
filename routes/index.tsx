@@ -61,6 +61,19 @@ function Description() {
         </li>
         <li>
           <a
+            href="https://github.com/pbkit/wrp-ts"
+            class={tw`text-orange-600 hover:underline`}
+          >
+            <b>wrp</b>
+          </a>: WebView Request Protocol.
+          <ul class={tw`text-gray-800 list-disc list-inside pl-4`}>
+            <li>message transport library between native(mobile app) and WebView</li>
+            <li>creates/maintains swift library, wrp-swift</li>
+            <li>writes documentation and builds examples in deno</li>
+          </ul>
+        </li>
+        <li>
+          <a
             href="https://github.com/riiid/urichk"
             class={tw`text-orange-600 hover:underline`}
           >
