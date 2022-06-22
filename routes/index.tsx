@@ -37,8 +37,8 @@ function Description() {
         </a>
       </h2>
       <p class={tw`text-gray-800`}>
-        Building internal bespoke toolkits and contributing to open source
-        projects used in Riiid. Previously worked on design system, testprep, Santa (product),
+        Builds internal bespoke toolkits and loves contributing open source
+        projects in Deno/web ecosystem. Previously worked on design system, testprep, Santa (product),
         and productivity utils as Frontend Engineer.
       </p>
       <p class={tw`text-gray-800`}>
@@ -48,11 +48,11 @@ function Description() {
       <ul class={tw`text-gray-800 list-disc list-inside pl-4`}>
         <li>
           <a
-            href="https://github.com/pbkit"
+            href="https://pbkit.dev/"
             class={tw`text-orange-600 hover:underline`}
           >
             <b>pbkit</b>
-          </a>: protobuf toolkit for Typescript and others.
+          </a>: Protobuf toolkit for modren web development.
           <ul class={tw`text-gray-800 list-disc list-inside pl-4`}>
             <li>language server for protocol buffers</li>
             <li>chrome extension like network panel for pbkit client</li>
