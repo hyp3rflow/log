@@ -13,7 +13,7 @@ export default function MainPage() {
         <title>log</title>
         <meta
           name="description"
-          content="No description provided. :("
+          content="somewhat technical blog"
         />
       </Head>
       <Hero>Yongwook Choi ⛵</Hero>
@@ -126,18 +126,11 @@ function Contact() {
         <li>
           <b>email</b>:{" "}
           <a
-            href="mailto:hyperflow@kakao.com"
+            href="mailto:flow@hrmm.xyz"
             class={tw`text-orange-600 hover:underline`}
           >
             <b>personal</b>
-          </a>,{" "}
-          <a
-            href="mailto:yongwook.choi@riiid.co"
-            class={tw`text-orange-600 hover:underline`}
-          >
-            <b>business</b>
-          </a>{" "}
-          (yongwook.choi@riiid.co)
+          </a>
         </li>
       </ul>
     </section>
