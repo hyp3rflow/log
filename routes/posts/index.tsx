@@ -14,6 +14,7 @@ interface MarkdownMeta {
   description: string;
   tag: string;
   author: string;
+  status?: string;
 }
 
 const timeFormat = new Intl.DateTimeFormat("en-US", {
@@ -27,7 +28,9 @@ const postsWithMarkdown = (await Promise.all(POSTS.map(async (post) => {
   const url = new URL(`../../posts/${post.name}`, import.meta.url);
   const markdown = await Deno.readTextFile(url);
   return { post, markdown };
-}))).sort((a, b) => {
+}))).filter((a) => {
+  return (Marked.parse(a.markdown).meta as MarkdownMeta).status !== "wip";
+}).sort((a, b) => {
   const aDate = new Date((Marked.parse(a.markdown).meta as MarkdownMeta).date);
   const bDate = new Date((Marked.parse(b.markdown).meta as MarkdownMeta).date);
   return bDate.getTime() - aDate.getTime();

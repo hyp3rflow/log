@@ -1,9 +1,10 @@
 ---
 title: WebView Request Protocol (WRP 🌯)
 date: 2023/02/22
-description: Introduction to WRP, ...and implementation detail
+description: Introduction to WRP, and implementation detail
 tag: WRP
 author: You
+status: wip
 ---
 
 # WebView Request Protocol (WRP 🌯)
@@ -399,13 +400,20 @@ HostInitialize가 앞서 말한 '호스트가 제공하는 메소드들은 요�
 
 ### 수명과 소켓 핸드셰이크 (handshake)
 
-그런데, 호스트가 연결을 시작하자마자 HostInitialize를 보낸다고 가정했을 때 게스트가 연결되지 않았다면 HostInitialize를 받지 못할 가능성이 있습니다. 이런 경우를 대비하기 위해 소켓에서의 핸드셰이크를 진행합니다.
+그런데, 호스트가 연결을 시작하자마자 HostInitialize를 보낸다고 가정했을 때
+게스트가 연결되지 않았다면 HostInitialize를 받지 못할 가능성이 있습니다. 이런
+경우를 대비하기 위해 소켓에서의 핸드셰이크를 진행합니다.
 
 WRP는 아래와 같은 경우에 대한 지원이 가능해야 합니다.
+
 - 앱(iOS-Android) > 웹뷰
 - 웹(parent) > iframe
 
-두 경우에서 공통으로 나타나는 수명과 관련된 특징이 있습니다. 바로 앱이 웹뷰보다 항상 오래 사는 것이 보장되고, 두번째 경우에서는 웹(parent)이 iframe보다 항상 오래 사는 것이 보장된다는 것입니다.
-iframe의 부모인 경우 앱 > 웹뷰와 마찬가지로 부모에서 iframe element에 대한 ref를 사용해야 하기 때문에, 공통적으로 웹(앱-웹뷰의 웹뷰, parent-iframe의 iframe)에서 소켓을 만들 때 부모의 소켓이 열려있는지 확인하는 과정을 거쳐야 합니다.
+두 경우에서 공통으로 나타나는 수명과 관련된 특징이 있습니다. 바로 앱이 웹뷰보다
+항상 오래 사는 것이 보장되고, 두번째 경우에서는 웹(parent)이 iframe보다 항상
+오래 사는 것이 보장된다는 것입니다. iframe의 부모인 경우 앱 > 웹뷰와 마찬가지로
+부모에서 iframe element에 대한 ref를 사용해야 하기 때문에, 공통적으로
+웹(앱-웹뷰의 웹뷰, parent-iframe의 iframe)에서 소켓을 만들 때 부모의 소켓이
+열려있는지 확인하는 과정을 거쳐야 합니다.
 
 /// (WIP: 부모가 handshake timeout 계산)
