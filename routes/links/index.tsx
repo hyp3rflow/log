@@ -31,7 +31,13 @@ export const handler: Handlers<Data> = {
     const url = new URL(`../../links.md`, import.meta.url);
     const markdown = await Deno.readTextFile(url);
     const markup = Marked.parse(markdown);
-    const page = { title: "links", path: "links", name: "links", markdown, meta: markup.meta as Page["meta"] };
+    const page = {
+      title: "links",
+      path: "links",
+      name: "links",
+      markdown,
+      meta: markup.meta as Page["meta"],
+    };
     const resp = ctx.render({ page });
     return resp;
   },
@@ -44,7 +50,7 @@ export default function PostPage(props: PageProps<Data>) {
         <title>{props.data.page.meta.title ?? "Not Found"} | hrmm</title>
         <link rel="stylesheet" href="/gfm.css" />
       </Head>
-      <Hero>Yongwook Choi 👑</Hero>
+      <Hero>hrmm</Hero>
       <NavigationBar active="/links" />
       <Main path={props.url.pathname} page={props.data.page} />
       <Footer />
@@ -53,7 +59,7 @@ export default function PostPage(props: PageProps<Data>) {
 }
 
 function Main(props: { path: string; page: Page }) {
-  const main = tw`mx-auto max-w-screen-sm px(4 sm:6 md:8) flex gap-6`;
+  const main = tw`mx-auto max-w-screen-lg px(4 sm:6 md:8) flex gap-6`;
   return (
     <>
       <div class={main}>

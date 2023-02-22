@@ -10,8 +10,8 @@ const LINKS = [
 ];
 
 export default function Footer() {
-  const footer = tw
-    `max-w-screen-sm mx-auto h-32 flex justify-between px(4 sm:6 md:8) text(xs)`;
+  const footer =
+    tw`max-w-screen-lg mx-auto h-32 flex justify-between px(4 sm:6 md:8) text(xs)`;
   const inner = tw`flex justify-center gap-8`;
   const linkStyle = tw`text-gray-800 hover:underline`;
   const copyright = tw`text(gray-800 center)`;

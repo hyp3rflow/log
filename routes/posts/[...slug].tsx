@@ -50,7 +50,7 @@ export default function PostPage(props: PageProps<Data>) {
         <title>{props.data.page.meta.title ?? "Not Found"} | fresh posts</title>
         <link rel="stylesheet" href="/gfm.css" />
       </Head>
-      <Hero>Yongwook Choi 👑</Hero>
+      <Hero>hrmm</Hero>
       <NavigationBar />
       <Main path={props.url.pathname} page={props.data.page} />
       <Footer />
@@ -59,7 +59,7 @@ export default function PostPage(props: PageProps<Data>) {
 }
 
 function Main(props: { path: string; page: Page }) {
-  const main = tw`mx-auto max-w-screen-sm px(4 sm:6 md:8) flex gap-6`;
+  const main = tw`mx-auto max-w-screen-lg px(4 sm:6 md:8) flex gap-6`;
   return (
     <>
       <div class={main}>

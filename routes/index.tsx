@@ -29,7 +29,7 @@ export default function MainPage() {
 function Description() {
   return (
     <section
-      class={tw`max-w-screen-sm mx-auto my-8 px(4 sm:6 md:8) space-y-4`}
+      class={tw`max-w-screen-lg mx-auto my-8 px(4 sm:6 md:8) space-y-4`}
     >
       <h2 id="description" class={tw`text(xl gray-800) font-bold`}>
         <a href="#description" class={tw`hover:underline`}>
@@ -38,8 +38,8 @@ function Description() {
       </h2>
       <p class={tw`text-gray-800`}>
         Builds internal bespoke toolkits and loves contributing open source
-        projects in Deno/web ecosystem. Previously worked on design system, testprep, Santa (product),
-        and productivity utils as Frontend Engineer.
+        projects in Deno/web ecosystem.<br />Previously worked on design system,
+        testprep, Santa (product), and productivity utils as Frontend Engineer.
       </p>
       <p class={tw`text-gray-800`}>
         Using <b>Deno</b>, Typescript, and gRPC with Protocol buffers.<br />
@@ -67,7 +67,9 @@ function Description() {
             <b>wrp</b>
           </a>: WebView Request Protocol.
           <ul class={tw`text-gray-800 list-disc list-inside pl-4`}>
-            <li>message transport library between native(mobile app) and WebView</li>
+            <li>
+              message transport library between native(mobile app) and WebView
+            </li>
             <li>creates/maintains swift library, wrp-swift</li>
             <li>writes documentation and builds examples in deno</li>
           </ul>
@@ -96,7 +98,7 @@ function Description() {
 function Contact() {
   return (
     <section
-      class={tw`max-w-screen-sm mx-auto my-8 px(4 sm:6 md:8) space-y-4`}
+      class={tw`max-w-screen-lg mx-auto my-8 px(4 sm:6 md:8) space-y-4`}
     >
       <h2 id="contact" class={tw`text(xl gray-800) font-bold`}>
         <a href="#contact" class={tw`hover:underline`}>
@@ -140,7 +142,7 @@ function Contact() {
 function Misc() {
   return (
     <section
-      class={tw`max-w-screen-sm mx-auto my-8 px(4 sm:6 md:8) space-y-4`}
+      class={tw`max-w-screen-lg mx-auto my-8 px(4 sm:6 md:8) space-y-4`}
     >
       <h2 id="example" class={tw`text(xl gray-800) font-bold`}>
         <a href="#example" class={tw`hover:underline`}>

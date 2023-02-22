@@ -23,11 +23,15 @@ const timeFormat = new Intl.DateTimeFormat("en-US", {
   day: "numeric",
 });
 
-const postsWithMarkdown = await Promise.all(POSTS.map(async (post) => {
+const postsWithMarkdown = (await Promise.all(POSTS.map(async (post) => {
   const url = new URL(`../../posts/${post.name}`, import.meta.url);
   const markdown = await Deno.readTextFile(url);
-  return {post, markdown};
-}))
+  return { post, markdown };
+}))).sort((a, b) => {
+  const aDate = new Date((Marked.parse(a.markdown).meta as MarkdownMeta).date);
+  const bDate = new Date((Marked.parse(b.markdown).meta as MarkdownMeta).date);
+  return bDate.getTime() - aDate.getTime();
+});
 
 export default function PostsPage() {
   return (
@@ -42,10 +46,9 @@ export default function PostsPage() {
       <Hero>Posts</Hero>
       <Navbar active="/posts" />
       <section
-        class={tw
-          `max-w-screen-sm mx-auto mb-8 px(4 sm:6 md:8) flex flex-col gap-8`}
+        class={tw`max-w-screen-lg mx-auto mb-8 px(4 sm:6 md:8) flex flex-col gap-8`}
       >
-        {postsWithMarkdown.map(({post, markdown}) => {
+        {postsWithMarkdown.map(({ post, markdown }) => {
           const meta = Marked.parse(markdown).meta as MarkdownMeta;
           return (
             <a href={`/posts/${post.name}`}>
