@@ -1,7 +1,7 @@
 ---
 title: Backpressuring in Streams
 date: 2022/05/07
-description: Korean, backpressuring
+description: backpressuring
 tag: Streams, Node
 author: You
 ---

@@ -2,17 +2,24 @@
 
 import { h, tw } from "../client_deps.ts";
 
-export default function NavigationBar(props: { active?: string }) {
-  const items = [
-    {
-      name: "About",
-      href: "/",
-    },
-    {
-      name: "Posts",
-      href: "/posts",
-    },
-  ];
+const items = [
+  {
+    name: "About",
+    href: "/",
+  },
+  {
+    name: "Posts",
+    href: "/posts",
+  },
+  {
+    name: "Links",
+    href: "/links",
+  }
+] as const;
+type Href = typeof items[number]["href"];
+
+export default function NavigationBar(props: { active?: Href }) {
+  
 
   return (
     <nav class={tw`max-w-screen-sm mx-auto px(4 sm:6 md:8)`}>

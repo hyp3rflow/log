@@ -1,15 +1,14 @@
 ---
-title: Swifting
+title: Swift Combine study note
 date: 2022/05/04
-description: Korean, Swift studying logs
+description: Swift Combine study note
 tag: Swift
 author: You
 ---
 
 > Multiplatform library 작업을 위해 Swift 공부용으로 작성된 글입니다.\
-> 잘못된 내용이 있을 수 있습니다. 도움을 주실 수 있다면 twt@hrmm_flow로 DM 주세요 _ _)
 
-# Swifting 1 (2022/05/04)
+# Swift Combine note
 
 ## 객체간 교신
 ### Callback
