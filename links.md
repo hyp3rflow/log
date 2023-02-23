@@ -51,3 +51,7 @@ https://promisesaplus.com/
 ### modern linker `mold`, and its design note
 
 https://github.com/rui314/mold/blob/main/docs/design.md
+
+### Hindley-Milner type system
+
+https://www.palindrom615.dev/hindley-milner-type-inference
