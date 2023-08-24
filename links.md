@@ -55,3 +55,7 @@ https://github.com/rui314/mold/blob/main/docs/design.md
 ### Hindley-Milner type system
 
 https://www.palindrom615.dev/hindley-milner-type-inference
+
+### An Introduction to Speculative Optimization in V8
+
+https://ponyfoo.com/articles/an-introduction-to-speculative-optimization-in-v8
