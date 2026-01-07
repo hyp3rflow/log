@@ -1,0 +1,32 @@
+{
+  "name": "log",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --turbopack",
+    "build": "pnpm panda && next build",
+    "start": "next start",
+    "lint": "eslint",
+    "panda": "panda codegen",
+    "prepare": "panda codegen"
+  },
+  "dependencies": {
+    "gray-matter": "^4.0.3",
+    "next": "16.1.1",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "react-markdown": "^10.1.0",
+    "rehype-highlight": "^7.0.2",
+    "rehype-raw": "^7.0.0",
+    "remark-gfm": "^4.0.1"
+  },
+  "devDependencies": {
+    "@pandacss/dev": "^1.8.0",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.1.1",
+    "typescript": "^5"
+  }
+}
