@@ -2,7 +2,7 @@
 title: "pnpm vs Yarn Berry — 패키지 매니저는 어떻게 패키지를 받는가"
 date: 2026/02/18
 description: "pnpm과 Yarn Berry의 내부 동작을 소스코드 레벨에서 비교 분석"
-tag: Node, pnpm, Yarn, PackageManager
+tag: llm-study, Node, pnpm, Yarn, PackageManager
 author: flow
 ---
 

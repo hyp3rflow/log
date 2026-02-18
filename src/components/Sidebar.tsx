@@ -8,6 +8,7 @@ const navItems = [
   { name: "about", href: "/" },
   { name: "posts", href: "/posts" },
   { name: "links", href: "/links" },
+  { name: "tax", href: "/tax" },
 ];
 
 export default function Sidebar() {
