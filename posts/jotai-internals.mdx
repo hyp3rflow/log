@@ -1,0 +1,315 @@
+---
+title: "Jotai 내부 동작 원리"
+date: 2026/02/18
+description: "Jotai의 atom, store, 의존성 그래프, React 통합까지 소스코드 레벨에서 분석"
+tag: llm-study, React, Jotai, StateManagement
+author: Claude Opus 4.6
+---
+
+# Jotai 내부 동작 원리
+
+## 1. 서론
+
+이 글은 Jotai v2.17.1 소스코드를 직접 읽고, 내부 동작 메커니즘을 분석한 결과이다. 핵심 파일은 `vanilla/atom.ts`, `vanilla/internals.ts`, `react/Provider.ts`, `react/useAtomValue.ts`, `react/useSetAtom.ts`이다. 모든 인용은 해당 버전의 실제 코드에 기반한다.
+
+## 2. atom() — 설정 객체 생성
+
+`atom()` 함수는 상태 컨테이너가 아닌 **설정 객체(config object)**를 반환한다. 실제 상태는 Store에 저장된다.
+
+```ts
+let keyCount = 0
+
+export function atom(read?, write?) {
+  const key = `atom${++keyCount}`
+  const config = {
+    toString() {
+      return import.meta.env?.MODE !== 'production' && this.debugLabel
+        ? key + ':' + this.debugLabel
+        : key
+    },
+  }
+  if (typeof read === 'function') {
+    config.read = read
+  } else {
+    config.init = read
+    config.read = defaultRead
+    config.write = defaultWrite
+  }
+  if (write) {
+    config.write = write
+  }
+  return config
+}
+```
+
+글로벌 `keyCount`로 모든 atom에 고유 키를 부여한다. TypeScript 오버로드는 4가지: writable derived, read-only derived, write-only derived, primitive atom이다.
+
+`defaultRead`는 `get(this)`로 자기 자신의 값을 읽고, `defaultWrite`는 `set(this, arg)`로 값을 직접 설정한다:
+
+```ts
+function defaultRead(this: Atom<Value>, get: Getter) {
+  return get(this)
+}
+
+function defaultWrite(this, get, set, arg) {
+  return set(this, typeof arg === 'function' ? arg(get(this)) : arg)
+}
+```
+
+즉 primitive atom의 `read`/`write`는 자기 참조(`this`)를 통해 동작한다.
+
+## 3. Store — 3개의 공개 API와 BuildingBlocks
+
+Store는 `get`, `set`, `sub` 3개의 메서드만 외부에 노출한다:
+
+```ts
+function buildStore(...buildArgs): Store {
+  const store = {
+    get(atom) { return storeGet(store, atom) },
+    set(atom, ...args) { return storeSet(store, atom, ...args) },
+    sub(atom, listener) { return storeSub(store, atom, listener) },
+  }
+  // ...
+}
+```
+
+내부적으로 `BuildingBlocks`라는 25개 슬롯의 튜플이 Store의 모든 상태와 함수를 관리한다. 슬롯 0~6은 상태(atomStateMap, mountedMap, invalidatedAtoms, changedAtoms, mountCallbacks, unmountCallbacks, storeHooks), 7~10은 atom 인터셉터, 11~24는 내부 함수이다.
+
+```ts
+type BuildingBlocks = [
+  atomStateMap: AtomStateMap,       // 0 - WeakMap<Atom, AtomState>
+  mountedMap: MountedMap,           // 1 - WeakMap<Atom, Mounted>
+  invalidatedAtoms: InvalidatedAtoms, // 2
+  changedAtoms: ChangedAtoms,       // 3 - Set<Atom>
+  // ... 총 25슬롯
+]
+```
+
+`atomStateMap`과 `mountedMap`은 모두 `WeakMap` 기반이다. atom 객체에 대한 강한 참조가 사라지면 해당 상태도 GC 대상이 된다. `buildingBlockMap` 역시 `WeakMap<Store, BuildingBlocks>`로, Store 자체의 메모리 누수를 방지한다.
+
+## 4. AtomState & Epoch — 변경 감지의 핵심
+
+각 atom의 런타임 상태는 `AtomState` 타입으로 관리된다:
+
+```ts
+type AtomState<Value> = {
+  readonly d: Map<AnyAtom, EpochNumber>  // 의존성 → epoch
+  readonly p: Set<AnyAtom>               // pending promise 의존자
+  n: EpochNumber                         // 자신의 epoch
+  v?: Value                              // 값
+  e?: AnyError                           // 에러
+}
+```
+
+`n`(epoch number)이 변경 감지의 핵심이다. `setAtomStateValueOrPromise`에서 `Object.is`로 이전 값과 비교하여, 다를 때만 epoch를 증가시킨다:
+
+```ts
+if (!hasPrevValue || !Object.is(prevValue, atomState.v)) {
+  ++atomState.n
+}
+```
+
+의존성 맵 `d`는 `Map<Atom, EpochNumber>` 형태로, 의존하는 atom과 그 당시의 epoch를 함께 저장한다. 이후 재계산 시 의존성의 현재 epoch와 저장된 epoch를 비교하여 캐시 유효성을 판단한다.
+
+## 5. 의존성 그래프 — getter를 통한 자동 수집
+
+`readAtomState` 내부에서 atom의 `read` 함수에 전달되는 `getter`가 의존성을 자동 수집한다:
+
+```ts
+function getter(a) {
+  if (a === atom) {
+    // 자기 자신 읽기: init 값 반환
+    return returnAtomValue(ensureAtomState(store, a))
+  }
+  const aState = readAtomState(store, a)
+  try {
+    return returnAtomValue(aState)
+  } finally {
+    atomState.d.set(a, aState.n)  // 의존성 등록
+  }
+}
+```
+
+매 `read` 호출 시 `atomState.d.clear()`로 의존성을 초기화한 뒤, getter 호출마다 `d.set(a, aState.n)`으로 재수집한다. 캐시 전략은 두 가지이다:
+
+1. **마운트된 atom**: `mountedMap`에 존재하고 invalidate되지 않았으면 캐시 사용
+2. **미마운트 atom**: 모든 의존성의 epoch가 변하지 않았으면 캐시 사용
+
+```ts
+if (mountedMap.has(atom) && invalidatedAtoms.get(atom) !== atomState.n) {
+  return atomState  // 캐시 히트
+}
+```
+
+## 6. Write Path — 쓰기와 전파
+
+`store.set` 호출 시 실행 경로는 `storeSet → writeAtomState → recomputeInvalidatedAtoms → flushCallbacks`이다.
+
+`writeAtomState` 내부의 `setter`에서 primitive atom에 직접 쓸 경우:
+
+```ts
+setAtomStateValueOrPromise(store, a, v)
+mountDependencies(store, a)
+if (prevEpochNumber !== aState.n) {
+  changedAtoms.add(a)
+  invalidateDependents(store, a)
+}
+```
+
+`invalidateDependents`는 DFS로 모든 의존자를 순회하며 `invalidatedAtoms`에 등록한다:
+
+```ts
+const stack = [atom]
+while (stack.length) {
+  const a = stack.pop()
+  for (const d of getMountedOrPendingDependents(a, aState, mountedMap)) {
+    invalidatedAtoms.set(d, dState.n)
+    stack.push(d)
+  }
+}
+```
+
+이후 `recomputeInvalidatedAtoms`는 **위상 정렬(topological sort)**로 올바른 순서로 재계산한다. DFS로 `topSortedReversed` 배열을 구성한 뒤 역순 순회하며, 변경된 의존성이 있는 atom만 `readAtomState`를 호출한다:
+
+```ts
+for (let i = topSortedReversed.length - 1; i >= 0; --i) {
+  const [a, aState] = topSortedReversed[i]
+  let hasChangedDeps = false
+  for (const dep of aState.d.keys()) {
+    if (dep !== a && changedAtoms.has(dep)) {
+      hasChangedDeps = true
+      break
+    }
+  }
+  if (hasChangedDeps) {
+    readAtomState(store, a)
+    mountDependencies(store, a)
+  }
+}
+```
+
+## 7. Mount/Unmount — 구독 생명주기
+
+atom이 `store.sub`를 통해 구독되면 "마운트"된다. `Mounted` 타입은 4개의 필드를 갖는다:
+
+```ts
+type Mounted = {
+  readonly l: Set<() => void>  // 리스너
+  readonly d: Set<AnyAtom>     // 마운트된 의존성
+  readonly t: Set<AnyAtom>     // 이 atom에 의존하는 atom들
+  u?: () => void               // onUnmount 콜백
+}
+```
+
+`mountAtom`은 재귀적으로 의존성을 먼저 마운트한 뒤 자신을 마운트한다. `onMount` 콜백은 `mountCallbacks` Set에 추가되어 `flushCallbacks`에서 실행된다.
+
+`unmountAtom`은 리스너가 없고(`l.size === 0`) 다른 마운트된 atom의 의존성이 아닐 때만 언마운트한다:
+
+```ts
+if (!mounted || mounted.l.size) return mounted
+let isDependent = false
+for (const a of mounted.t) {
+  if (mountedMap.get(a)?.d.has(atom)) {
+    isDependent = true
+    break
+  }
+}
+if (!isDependent) {
+  mountedMap.delete(atom)
+  // 의존성도 재귀적으로 언마운트
+}
+```
+
+`mountedMap`이 `WeakMap`이므로, 언마운트 후 atom 참조가 사라지면 `Mounted` 객체와 `AtomState` 모두 GC된다.
+
+## 8. React 통합 — Provider, useAtomValue, useSetAtom
+
+`Provider`는 React Context로 Store를 주입한다. store prop이 없으면 `useRef`로 한 번만 `createStore()`를 호출한다:
+
+```ts
+export function Provider({ children, store }) {
+  const storeRef = useRef(null)
+  if (store) {
+    return createElement(StoreContext.Provider, { value: store }, children)
+  }
+  if (storeRef.current === null) {
+    storeRef.current = createStore()
+  }
+  return createElement(StoreContext.Provider, { value: storeRef.current }, children)
+}
+```
+
+`useStore`는 `useContext(StoreContext) || getDefaultStore()`로 Store를 반환한다. Provider 없이도 전역 기본 Store를 사용할 수 있다.
+
+`useAtomValue`는 `useReducer`로 값을 관리하고, `useEffect`에서 `store.sub`로 구독한다:
+
+```ts
+const [[valueFromReducer, storeFromReducer, atomFromReducer], rerender] =
+  useReducer((prev) => {
+    const nextValue = store.get(atom)
+    if (Object.is(prev[0], nextValue) && prev[1] === store && prev[2] === atom) {
+      return prev
+    }
+    return [nextValue, store, atom]
+  }, undefined, () => [store.get(atom), store, atom])
+
+useEffect(() => {
+  const unsub = store.sub(atom, () => rerender())
+  rerender()
+  return unsub
+}, [store, atom, delay, promiseStatus])
+```
+
+`rerender`는 reducer를 트리거하고, reducer 내부에서 `Object.is`로 값이 같으면 이전 상태를 그대로 반환하여 불필요한 리렌더링을 방지한다.
+
+`useSetAtom`은 `useCallback`으로 `store.set(atom, ...args)`를 감싼 setter를 반환한다:
+
+```ts
+const setAtom = useCallback(
+  (...args) => store.set(atom, ...args),
+  [store, atom],
+)
+```
+
+## 9. 비동기 atom — Promise 처리
+
+비동기 atom의 `read`가 Promise를 반환하면, `setAtomStateValueOrPromise`는 Promise 자체를 `atomState.v`에 저장한다. 이전 값이 Promise였다면 `abortPromise`로 중단한다.
+
+`promiseStateMap`은 `WeakMap<PromiseLike, [pending, abortHandlers]>`로 Promise의 상태를 추적한다:
+
+```ts
+const promiseStateMap: WeakMap<
+  PromiseLike<unknown>,
+  [pending: boolean, abortHandlers: Set<() => void>]
+> = new WeakMap()
+```
+
+`readAtomState`는 AbortController를 lazy하게 생성하여 `options.signal`로 제공한다. Promise가 반환되면 `registerAbortHandler`로 abort 핸들러를 등록하고, 새 값으로 교체 시 이전 Promise의 abort 핸들러를 실행한다.
+
+React 측에서는 `useAtomValue` 내부의 `createContinuablePromise`가 Promise 체이닝을 관리한다. abort 시 새로운 `getValue()` 호출로 다음 Promise를 이어받아, React의 `use()` (또는 throw promise 폴백)로 Suspense를 유지한다:
+
+```ts
+const onAbort = () => {
+  const nextValue = getValue()
+  if (isPromiseLike(nextValue)) {
+    continuablePromiseMap.set(nextValue, continuablePromise)
+    curr = nextValue
+    nextValue.then(onFulfilled(nextValue), onRejected(nextValue))
+  } else {
+    resolve(nextValue)
+  }
+}
+```
+
+## 10. 정리
+
+Jotai v2.17.1의 핵심 메커니즘을 요약하면 다음과 같다:
+
+- **atom은 설정 객체**이다. 상태는 Store의 WeakMap에 저장된다.
+- **epoch 기반 변경 감지**: `Object.is` 비교 후 epoch(`n`)을 증가시켜 변경을 추적한다.
+- **자동 의존성 수집**: `read` 함수의 getter 호출 시 `atomState.d`에 의존성과 epoch를 기록한다.
+- **Write 전파**: DFS로 의존자를 invalidate하고, 위상 정렬 순서로 재계산한다.
+- **Mount/Unmount**: 구독자가 있는 atom만 마운트되며, WeakMap 기반으로 GC가 자연스럽게 동작한다.
+- **React 통합**: `useReducer` + `store.sub`로 구독하고, `Object.is`로 불필요한 리렌더링을 방지한다.
+- **비동기**: `promiseStateMap`으로 Promise 상태를 추적하고, continuablePromise로 Suspense와 통합한다.
+- **BuildingBlocks 25슬롯 튜플**: 모든 내부 함수를 교체 가능하게 설계하여 확장성을 제공한다.
