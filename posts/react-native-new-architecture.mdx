@@ -25,6 +25,8 @@ React Native의 핵심 아이디어는 단순하다: **JavaScript로 네이티�
 
 이 글에서는 [React Native 소스코드](https://github.com/facebook/react-native/tree/51dc568d2016) (commit `51dc568`)를 직접 들여다보면서, 전체 아키텍처를 분해한다.
 
+<RNArchitectureDiagram />
+
 ## 2. 전체 아키텍처 개요
 
 ### 스레드 모델
@@ -146,6 +148,8 @@ void RCTEnableFabricInteropLayer(BOOL enabled);
 [GitHub](https://github.com/facebook/react-native/blob/51dc568d2016/packages/react-native/React/Base/RCTBridge.h)
 
 Interop 플래그들이 보인다. 기존 Bridge 기반 모듈을 New Architecture에서도 사용할 수 있게 해주는 호환성 레이어다.
+
+<JSICallFlow />
 
 ## 4. JS Runtime & Hermes
 
@@ -569,6 +573,8 @@ class TurboModuleBinding final {
 
 `legacyModuleProvider` 파라미터는 Old Architecture 모듈과의 호환성을 위한 것이다. TurboModule로 찾지 못한 모듈을 레거시 방식으로 폴백한다.
 
+<TurboModuleComparison />
+
 ### 레이지 로딩
 
 Old Architecture에서는 앱 시작 시 모든 네이티브 모듈을 초기화했다. Camera 모듈, Bluetooth 모듈, 결제 모듈... 사용하지 않더라도 전부.
@@ -713,6 +719,8 @@ JS Props 정의 → Codegen → GeneratePropsH.js      → Props.h
                         → GenerateEventEmitterH.js → EventEmitter.h
                         → GenerateComponentDescriptorH.js → ComponentDescriptor.h
 ```
+
+<FabricPipeline />
 
 ## 8. C++ Core 구조 상세
 

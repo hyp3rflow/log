@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { getAllPosts, getPostBySlug } from "@/lib/posts";
 import Markdown from "@/components/Markdown";
+import { MdxContent } from "@/components/MdxContent";
 
 interface PageProps {
   params: Promise<{ slug: string }>;
@@ -10,19 +11,13 @@ interface PageProps {
 
 export async function generateStaticParams() {
   const posts = getAllPosts();
-  return posts.map((post) => ({
-    slug: post.slug,
-  }));
+  return posts.map((post) => ({ slug: post.slug }));
 }
 
 export async function generateMetadata({ params }: PageProps) {
   const { slug } = await params;
   const post = getPostBySlug(slug);
-
-  if (!post) {
-    return { title: "Post Not Found" };
-  }
-
+  if (!post) return { title: "Post Not Found" };
   return {
     title: `${post.meta.title} | log`,
     description: post.meta.description,
@@ -41,10 +36,7 @@ const formatDate = (dateString: string) => {
 export default async function PostPage({ params }: PageProps) {
   const { slug } = await params;
   const post = getPostBySlug(slug);
-
-  if (!post) {
-    notFound();
-  }
+  if (!post) notFound();
 
   return (
     <article className={css({ maxWidth: "768px", mx: "auto" })}>
@@ -58,7 +50,11 @@ export default async function PostPage({ params }: PageProps) {
         </p>
       </header>
 
-      <Markdown content={post.content} />
+      {post.format === "mdx" ? (
+        <MdxContent source={post.content} />
+      ) : (
+        <Markdown content={post.content} />
+      )}
 
       <footer className={css({ mt: "xl" })}>
         <Link href="/posts">← back to posts</Link>

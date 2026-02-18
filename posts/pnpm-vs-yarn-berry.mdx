@@ -22,6 +22,8 @@ npm은 오랫동안 표준이었지만 몇 가지 구조적 한계가 있었다:
 
 이 글에서는 두 패키지 매니저의 내부 동작을 **실제 소스코드**를 읽으며 비교한다. 의존성 해석(Resolution) → 다운로드 & 캐싱(Fetching) → node_modules 구성(Linking) 세 단계로 나눠서 살펴보겠다.
 
+<PackageManagerFlow />
+
 ---
 
 ## 2. 의존성 해석 (Resolution)
@@ -371,6 +373,8 @@ Yarn Berry는 **프로젝트 로컬 캐시** (`.yarn/cache/`)와 **글로벌 미
 | **zero-install** | 불가능 (하드 링크 의존) | 가능 (.yarn/cache/ 커밋) |
 | **이식성** | 같은 파일 시스템 필수 | 어디서든 동작 |
 
+<CASExplainer />
+
 ---
 
 ## 4. node_modules 구조 (또는 대안)
@@ -555,6 +559,8 @@ function resolveToUnqualified(
 5. "lodash의 실제 파일 위치는" → `packageLocation` (보통 `.yarn/cache/` 안의 zip에서 읽음)
 
 **선언하지 않은 의존성에 접근하면?** `packageDependencies`에 없으므로 4번에서 `null`이 반환되고, `MISSING_PEER_DEPENDENCY` 또는 `UNDECLARED_DEPENDENCY` 에러가 발생한다. pnpm과 같은 결과이지만, 달성 방식이 완전히 다르다.
+
+<NodeModulesTree />
 
 ### 4.3 비교: symlink vs PnP
 
