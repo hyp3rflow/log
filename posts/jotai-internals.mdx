@@ -271,35 +271,190 @@ const setAtom = useCallback(
 )
 ```
 
-## 9. 비동기 atom — Promise 처리
+## 9. 비동기 atom — Promise, Abort, Suspense
 
-비동기 atom의 `read`가 Promise를 반환하면, `setAtomStateValueOrPromise`는 Promise 자체를 `atomState.v`에 저장한다. 이전 값이 Promise였다면 `abortPromise`로 중단한다.
+비동기 atom의 전체 흐름은 크게 3단계로 나뉜다: (1) Store에서 Promise를 값으로 저장하고 abort를 관리하는 단계, (2) React에서 Promise를 Suspense 가능한 형태로 변환하는 단계, (3) 의존성이 바뀌어 재계산될 때 이전 Promise를 abort하고 새 Promise로 이어가는 단계이다.
 
-`promiseStateMap`은 `WeakMap<PromiseLike, [pending, abortHandlers]>`로 Promise의 상태를 추적한다:
+### 9.1 Store 측: promiseStateMap과 abort 메커니즘
+
+`promiseStateMap`은 `WeakMap<PromiseLike, [pending: boolean, abortHandlers: Set]>`로, Promise의 pending 여부와 abort 핸들러 목록을 추적한다:
 
 ```ts
+// vanilla/internals.ts
 const promiseStateMap: WeakMap<
   PromiseLike<unknown>,
   [pending: boolean, abortHandlers: Set<() => void>]
 > = new WeakMap()
-```
 
-`readAtomState`는 AbortController를 lazy하게 생성하여 `options.signal`로 제공한다. Promise가 반환되면 `registerAbortHandler`로 abort 핸들러를 등록하고, 새 값으로 교체 시 이전 Promise의 abort 핸들러를 실행한다.
+function registerAbortHandler(promise, abortHandler) {
+  let promiseState = promiseStateMap.get(promise)
+  if (!promiseState) {
+    promiseState = [true, new Set()]
+    promiseStateMap.set(promise, promiseState)
+    const settle = () => { promiseState![0] = false }
+    promise.then(settle, settle)  // resolve/reject 시 pending = false
+  }
+  promiseState[1].add(abortHandler)
+}
 
-React 측에서는 `useAtomValue` 내부의 `createContinuablePromise`가 Promise 체이닝을 관리한다. abort 시 새로운 `getValue()` 호출로 다음 Promise를 이어받아, React의 `use()` (또는 throw promise 폴백)로 Suspense를 유지한다:
-
-```ts
-const onAbort = () => {
-  const nextValue = getValue()
-  if (isPromiseLike(nextValue)) {
-    continuablePromiseMap.set(nextValue, continuablePromise)
-    curr = nextValue
-    nextValue.then(onFulfilled(nextValue), onRejected(nextValue))
-  } else {
-    resolve(nextValue)
+function abortPromise(promise) {
+  const promiseState = promiseStateMap.get(promise)
+  if (promiseState?.[0]) {           // pending 상태일 때만
+    promiseState[0] = false          // pending 해제
+    promiseState[1].forEach((fn) => fn())  // 모든 abort 핸들러 실행
   }
 }
 ```
+
+`readAtomState`에서 비동기 atom의 `read`가 Promise를 반환하면, AbortController를 lazy하게 생성하고 해당 Promise에 abort 핸들러를 등록한다:
+
+```ts
+// readAtomState 내부
+let controller: AbortController | undefined
+const options = {
+  get signal() {
+    if (!controller) controller = new AbortController()
+    return controller.signal
+  },
+}
+// ...
+const valueOrPromise = atomRead(store, atom, getter, options)
+setAtomStateValueOrPromise(store, atom, valueOrPromise)
+if (isPromiseLike(valueOrPromise)) {
+  registerAbortHandler(valueOrPromise, () => controller?.abort())
+}
+```
+
+`setAtomStateValueOrPromise`에서 값이 교체될 때, 이전 값이 Promise이고 새 값과 다르면 `abortPromise(prevValue)`가 호출된다:
+
+```ts
+// setAtomStateValueOrPromise
+atomState.v = valueOrPromise
+delete atomState.e
+if (!hasPrevValue || !Object.is(prevValue, atomState.v)) {
+  ++atomState.n
+  if (isPromiseLike(prevValue)) {
+    abortPromise(prevValue)  // 이전 Promise abort → controller.abort() 실행
+  }
+}
+```
+
+즉, 의존성이 바뀌어 `readAtomState`가 다시 호출되면: 새 Promise가 `atomState.v`에 저장 → 이전 Promise가 abort → 이전 Promise의 AbortController에 signal 발생 → atom의 `read` 함수에서 `signal.aborted`로 이를 감지할 수 있다.
+
+### 9.2 React 측: continuablePromise와 Suspense 트리거
+
+`useAtomValue`에서 `store.get(atom)`의 반환값이 Promise면, 그대로 `React.use()`에 넘기는 것이 아니라 `createContinuablePromise`로 한번 감싼다:
+
+```ts
+// react/useAtomValue.ts
+if (isPromiseLike(value)) {
+  const promise = createContinuablePromise(value, () => store.get(atom))
+  return use(promise)  // React.use() 또는 throw promise (shim)
+}
+```
+
+`use()`의 shim 구현은 React 19 이전에서 Suspense를 트리거한다:
+
+```ts
+const use = React.use || ((promise) => {
+  if (promise.status === 'pending') {
+    throw promise    // ← Suspense 트리거: React가 이 throw를 잡아 fallback 렌더링
+  } else if (promise.status === 'fulfilled') {
+    return promise.value
+  } else if (promise.status === 'rejected') {
+    throw promise.reason
+  } else {
+    attachPromiseStatus(promise)
+    throw promise    // 첫 호출 시에도 throw
+  }
+})
+```
+
+`attachPromiseStatus`는 Promise 객체에 `.status`, `.value`, `.reason` 프로퍼티를 추가하여 `use()`가 동기적으로 상태를 확인할 수 있게 한다:
+
+```ts
+const attachPromiseStatus = (promise) => {
+  if (!promise.status) {
+    promise.status = 'pending'
+    promise.then(
+      (v) => { promise.status = 'fulfilled'; promise.value = v },
+      (e) => { promise.status = 'rejected'; promise.reason = e },
+    )
+  }
+}
+```
+
+### 9.3 continuablePromise — 값이 바뀌어도 같은 Promise 유지
+
+`createContinuablePromise`가 핵심이다. 이 함수는 원본 Promise를 감싸는 **단일 wrapper Promise**를 만들고, abort가 발생하면 내부적으로 새 Promise로 교체한다. React에게는 같은 Promise 객체를 유지하므로 불필요한 Suspense 재트리거를 방지한다:
+
+```ts
+const createContinuablePromise = (promise, getValue) => {
+  let continuablePromise = continuablePromiseMap.get(promise)
+  if (!continuablePromise) {
+    continuablePromise = new Promise((resolve, reject) => {
+      let curr = promise
+      const onFulfilled = (me) => (v) => { if (curr === me) resolve(v) }
+      const onRejected = (me) => (e) => { if (curr === me) reject(e) }
+      const onAbort = () => {
+        try {
+          const nextValue = getValue()      // store.get(atom) 재호출
+          if (isPromiseLike(nextValue)) {
+            continuablePromiseMap.set(nextValue, continuablePromise!)
+            curr = nextValue                 // 새 Promise로 교체
+            nextValue.then(onFulfilled(nextValue), onRejected(nextValue))
+            registerAbortHandler(nextValue, onAbort)  // 다음 abort도 대비
+          } else {
+            resolve(nextValue)               // 동기 값이면 즉시 resolve
+          }
+        } catch (e) {
+          reject(e)
+        }
+      }
+      promise.then(onFulfilled(promise), onRejected(promise))
+      registerAbortHandler(promise, onAbort)
+    })
+    continuablePromiseMap.set(promise, continuablePromise)
+  }
+  return continuablePromise
+}
+```
+
+전체 흐름을 순서대로 정리하면:
+
+1. 비동기 atom `A`의 `read`가 Promise P1을 반환
+2. `atomState.v = P1`, `registerAbortHandler(P1, () => controller.abort())`
+3. `useAtomValue`에서 `createContinuablePromise(P1, () => store.get(A))` → wrapper Promise W 생성
+4. `use(W)` → W는 pending이므로 `throw W` → **Suspense fallback 렌더링**
+5. A의 의존성이 변경됨 → `readAtomState(A)` 재호출 → 새 Promise P2 반환
+6. `setAtomStateValueOrPromise`에서 `atomState.v = P2`, `Object.is(P1, P2)` → false → `abortPromise(P1)` 실행
+7. P1의 abort 핸들러 실행 → controller.abort() (atom의 read에서 signal.aborted 감지 가능)
+8. continuablePromise의 `onAbort` 실행 → `getValue()` = `store.get(A)` → P2 반환
+9. `curr = P2`, `P2.then(...)` 등록 — **wrapper Promise W는 동일 객체를 유지**
+10. P2가 resolve되면 → W도 resolve → `use(W)`가 값 반환 → **컴포넌트 렌더링**
+
+`continuablePromiseMap`은 `WeakMap`이므로 Promise가 GC되면 매핑도 자동 정리된다. 또한 `useEffect`의 subscriber에서도 Promise 상태를 갱신한다:
+
+```ts
+useEffect(() => {
+  const unsub = store.sub(atom, () => {
+    if (promiseStatus) {
+      try {
+        const value = store.get(atom)
+        if (isPromiseLike(value)) {
+          attachPromiseStatus(
+            createContinuablePromise(value, () => store.get(atom)),
+          )
+        }
+      } catch { /* ignore */ }
+    }
+    rerender()
+  })
+  // ...
+}, [store, atom, delay, promiseStatus])
+```
+
+atom 값이 변경될 때마다 subscriber가 호출되고, Promise인 경우 `attachPromiseStatus`로 `.status`를 갱신한 뒤 `rerender()`로 React에게 재평가를 요청한다.
 
 ## 10. 정리
 
