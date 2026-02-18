@@ -1,6 +1,7 @@
 import { css } from "../../../styled-system/css";
 import Link from "next/link";
 import { getAllPosts } from "@/lib/posts";
+import AiGenBadge from "@/components/AiGenBadge";
 
 const formatDate = (dateString: string) => {
   const date = new Date(dateString);
@@ -32,7 +33,7 @@ export default function PostsPage() {
               {" "}
               <Link href={`/posts/${post.slug}`}>{post.meta.title}</Link>
               {post.meta.author && /claude|gpt|gemini|llama|opus|sonnet/i.test(post.meta.author) && (
-                <span title={`AI Generated (${post.meta.author})`} className={css({ ml: "xs", opacity: 0.6, fontSize: "12px" })}>💎</span>
+                <AiGenBadge author={post.meta.author} />
               )}
             </li>
           ))}

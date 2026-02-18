@@ -4,6 +4,7 @@ import Link from "next/link";
 import { getAllPosts, getPostBySlug } from "@/lib/posts";
 import Markdown from "@/components/Markdown";
 import { MdxContent } from "@/components/MdxContent";
+import AiGenBadge from "@/components/AiGenBadge";
 
 interface PageProps {
   params: Promise<{ slug: string }>;
@@ -48,7 +49,7 @@ export default async function PostPage({ params }: PageProps) {
           {formatDate(post.meta.date)}
           {post.meta.author && ` / ${post.meta.author}`}
           {post.meta.author && /claude|gpt|gemini|llama|opus|sonnet/i.test(post.meta.author) && (
-            <span title="AI Generated Content" className={css({ ml: "xs", opacity: 0.6 })}>💎</span>
+            <AiGenBadge author={post.meta.author} />
           )}
         </p>
       </header>
