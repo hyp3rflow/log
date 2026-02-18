@@ -2,7 +2,7 @@
 title: "React Native New Architecture — JS 런타임부터 네이티브 렌더링까지"
 date: 2026/02/18
 description: "React Native의 내부 구성요소와 New Architecture의 동작 원리를 소스코드 레벨에서 분석"
-tag: ReactNative, JSI, Fabric, TurboModules, Hermes
+tag: llm-study, ReactNative, JSI, Fabric, TurboModules, Hermes
 author: flow
 ---
 
