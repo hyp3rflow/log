@@ -17,6 +17,7 @@ author: Claude Opus 4.6
 `atom()` 함수는 상태 컨테이너가 아닌 **설정 객체(config object)**를 반환한다. 실제 상태는 Store에 저장된다.
 
 ```ts
+// [focus:3,5,10-13,15-17]
 let keyCount = 0
 
 export function atom(read?, write?) {
@@ -116,6 +117,7 @@ if (!hasPrevValue || !Object.is(prevValue, atomState.v)) {
 `readAtomState` 내부에서 atom의 `read` 함수에 전달되는 `getter`가 의존성을 자동 수집한다:
 
 ```ts
+// [focus:2-4,7,10]
 function getter(a) {
   if (a === atom) {
     // 자기 자신 읽기: init 값 반환
@@ -241,34 +243,79 @@ export function Provider({ children, store }) {
 
 `useStore`는 `useContext(StoreContext) || getDefaultStore()`로 Store를 반환한다. Provider 없이도 전역 기본 Store를 사용할 수 있다.
 
-`useAtomValue`는 `useReducer`로 값을 관리하고, `useEffect`에서 `store.sub`로 구독한다:
+`useAtomValue`는 `useReducer`로 값을 관리하고, `useEffect`에서 `store.sub`로 구독한다. 함수 전체를 보면:
 
 ```ts
-const [[valueFromReducer, storeFromReducer, atomFromReducer], rerender] =
-  useReducer((prev) => {
-    const nextValue = store.get(atom)
-    if (Object.is(prev[0], nextValue) && prev[1] === store && prev[2] === atom) {
-      return prev
-    }
-    return [nextValue, store, atom]
-  }, undefined, () => [store.get(atom), store, atom])
+// [focus:5,7-9,15,22-24,30-31,34-37]
+export function useAtomValue<Value>(atom: Atom<Value>, options?: Options) {
+  const { delay, unstable_promiseStatus: promiseStatus = !React.use } =
+    options || {}
+  const store = useStore(options)
 
-useEffect(() => {
-  const unsub = store.sub(atom, () => rerender())
-  rerender()
-  return unsub
-}, [store, atom, delay, promiseStatus])
+  const [[valueFromReducer, storeFromReducer, atomFromReducer], rerender] =
+    useReducer<readonly [Value, Store, typeof atom], undefined, []>(
+      (prev) => {
+        const nextValue = store.get(atom)
+        if (
+          Object.is(prev[0], nextValue) &&
+          prev[1] === store &&
+          prev[2] === atom
+        ) {
+          return prev
+        }
+        return [nextValue, store, atom]
+      },
+      undefined,
+      () => [store.get(atom), store, atom],
+    )
+
+  let value = valueFromReducer
+  if (storeFromReducer !== store || atomFromReducer !== atom) {
+    rerender()
+    value = store.get(atom)
+  }
+
+  useEffect(() => {
+    const unsub = store.sub(atom, () => {
+      if (typeof delay === 'number') {
+        setTimeout(rerender, delay)
+        return
+      }
+      rerender()
+    })
+    rerender()
+    return unsub
+  }, [store, atom, delay, promiseStatus])
+
+  useDebugValue(value)
+  if (isPromiseLike(value)) {
+    const promise = createContinuablePromise(value, () => store.get(atom))
+    return use(promise)
+  }
+  return value as Awaited<Value>
+}
 ```
 
-`rerender`는 reducer를 트리거하고, reducer 내부에서 `Object.is`로 값이 같으면 이전 상태를 그대로 반환하여 불필요한 리렌더링을 방지한다.
+핵심은 세 가지이다:
+1. `useReducer`의 reducer가 `Object.is`로 값을 비교하여 동일하면 이전 상태를 반환 → 불필요한 리렌더링 방지
+2. `useEffect`에서 `store.sub(atom, rerender)`로 구독하여 atom 변경 시 reducer를 트리거
+3. 반환값이 Promise면 `createContinuablePromise`로 감싸서 `use()`에 전달 → Suspense 통합
 
-`useSetAtom`은 `useCallback`으로 `store.set(atom, ...args)`를 감싼 setter를 반환한다:
+`useSetAtom`은 값을 구독하지 않고 setter만 반환한다. atom 값이 변경되어도 이 훅을 사용하는 컴포넌트는 리렌더되지 않는다:
 
 ```ts
-const setAtom = useCallback(
-  (...args) => store.set(atom, ...args),
-  [store, atom],
-)
+// [focus:6-8]
+export function useSetAtom<Value, Args extends unknown[], Result>(
+  atom: WritableAtom<Value, Args, Result>,
+  options?: Options,
+) {
+  const store = useStore(options)
+  const setAtom = useCallback(
+    (...args: Args) => store.set(atom, ...args),
+    [store, atom],
+  )
+  return setAtom
+}
 ```
 
 ## 9. 비동기 atom — Promise, Abort, Suspense
@@ -280,6 +327,7 @@ const setAtom = useCallback(
 `promiseStateMap`은 `WeakMap<PromiseLike, [pending: boolean, abortHandlers: Set]>`로, Promise의 pending 여부와 abort 핸들러 목록을 추적한다:
 
 ```ts
+// [focus:3-5,10-11,16,21-23]
 // vanilla/internals.ts
 const promiseStateMap: WeakMap<
   PromiseLike<unknown>,
@@ -309,6 +357,7 @@ function abortPromise(promise) {
 `readAtomState`에서 비동기 atom의 `read`가 Promise를 반환하면, AbortController를 lazy하게 생성하고 해당 Promise에 abort 핸들러를 등록한다:
 
 ```ts
+// [focus:4-6,11-14]
 // readAtomState 내부
 let controller: AbortController | undefined
 const options = {
@@ -328,6 +377,7 @@ if (isPromiseLike(valueOrPromise)) {
 `setAtomStateValueOrPromise`에서 값이 교체될 때, 이전 값이 Promise이고 새 값과 다르면 `abortPromise(prevValue)`가 호출된다:
 
 ```ts
+// [focus:4-8]
 // setAtomStateValueOrPromise
 atomState.v = valueOrPromise
 delete atomState.e
@@ -356,6 +406,7 @@ if (isPromiseLike(value)) {
 `use()`의 shim 구현은 React 19 이전에서 Suspense를 트리거한다:
 
 ```ts
+// [focus:3,10-11]
 const use = React.use || ((promise) => {
   if (promise.status === 'pending') {
     throw promise    // ← Suspense 트리거: React가 이 throw를 잡아 fallback 렌더링
@@ -389,6 +440,7 @@ const attachPromiseStatus = (promise) => {
 `createContinuablePromise`가 핵심이다. 이 함수는 원본 Promise를 감싸는 **단일 wrapper Promise**를 만들고, abort가 발생하면 내부적으로 새 Promise로 교체한다. React에게는 같은 Promise 객체를 유지하므로 불필요한 Suspense 재트리거를 방지한다:
 
 ```ts
+// [focus:9-17,23-24]
 const createContinuablePromise = (promise, getValue) => {
   let continuablePromise = continuablePromiseMap.get(promise)
   if (!continuablePromise) {
