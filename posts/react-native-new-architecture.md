@@ -3,7 +3,7 @@ title: "React Native New Architecture — JS 런타임부터 네이티브 렌더
 date: 2026/02/18
 description: "React Native의 내부 구성요소와 New Architecture의 동작 원리를 소스코드 레벨에서 분석"
 tag: llm-study, ReactNative, JSI, Fabric, TurboModules, Hermes
-author: flow
+author: Claude Opus 4.6
 ---
 
 # React Native New Architecture — JS 런타임부터 네이티브 렌더링까지
@@ -809,32 +809,22 @@ ReactCommon/
 
 5. **C++ Shadow Tree 공유**: iOS와 Android가 동일한 C++ 코드로 레이아웃을 계산한다. 플랫폼 간 렌더링 일관성이 높아졌고, 버그 수정이 한 번에 양쪽에 적용된다.
 
-## 10. 결론
+## 10. 정리
 
-### New Architecture가 가져온 근본적 변화
+| | Old Architecture | New Architecture |
+|---|---|---|
+| **JS ↔ Native 통신** | Bridge (JSON 직렬화, 비동기) | JSI (C++ 직접 호출, 동기/비동기) |
+| **렌더링** | UIManager (Bridge 경유) | Fabric (C++ Shadow Tree) |
+| **네이티브 모듈** | NativeModules (앱 시작 시 전체 로드) | TurboModules (레이지 로딩) |
+| **타입 안정성** | 런타임 검증 | Codegen (컴파일 타임 검증) |
+| **C++ 공유** | 제한적 | iOS/Android 공통 C++ 코어 |
+| **Concurrent Mode** | 미지원 | 지원 (Priority 기반 렌더링) |
+| **동기 호출** | 불가 | 가능 (JSI `HostFunction`) |
 
-New Architecture는 단순한 성능 개선이 아니다. React Native의 **근본 구조**를 바꿨다:
-
-- **Bridge → JSI**: 메시지 전달에서 직접 호출로. 두 세계의 장벽이 사라졌다.
-- **비동기 only → 동기+비동기**: 개발자가 상황에 맞는 통신 패턴을 선택할 수 있게 됐다.
-- **JavaScript ↔ C++ ↔ Native** 3계층 구조가 명확해졌고, C++ 코어를 iOS/Android가 공유한다.
-- **Codegen**으로 JS와 네이티브 사이의 계약이 컴파일 타임에 검증된다.
-
-### 아직 남은 과제
-
-- **마이그레이션**: 수많은 서드파티 라이브러리가 아직 Old Architecture 기반이다. Interop 레이어(`RCTTurboModuleInteropEnabled`, `RCTFabricInteropLayerEnabled`)가 이 과도기를 지탱하고 있다.
-- **Android 비동기 마운팅**: `MountingCoordinator`의 `willPerformAsynchronously` 파라미터가 보여주듯, Android는 아직 완전한 동기 마운팅으로 전환하지 못했다.
-- **복잡성**: C++ 코어가 강력하지만, 디버깅이 어렵다. JS → JSI → C++ → Platform Native까지 4단계를 넘나드는 스택 트레이스는 만만치 않다.
-
-### 개발자에게 미치는 영향
-
-일반적인 앱 개발자에게 New Architecture는 대부분 투명하다. `react-native upgrade`와 라이브러리 업데이트로 점진적으로 전환된다. 하지만 **네이티브 모듈이나 커스텀 컴포넌트를 만드는 개발자**에게는 패러다임 전환이다:
-
-- Flow/TypeScript 스펙 작성이 필수
-- Codegen 파이프라인 이해 필요
-- C++ 코드와의 상호작용 가능성
-
-React Native는 "JS로 모바일 앱을 만드는 프레임워크"에서 "JS, C++, 네이티브가 긴밀하게 통합된 크로스 플랫폼 런타임"으로 진화하고 있다. 소스코드를 직접 들여다보면, 그 진화의 깊이를 실감할 수 있다.
+현재 마이그레이션 상태:
+- Interop 레이어(`RCTTurboModuleInteropEnabled`, `RCTFabricInteropLayerEnabled`)로 Old/New 혼용 가능
+- Android는 `MountingCoordinator`의 `willPerformAsynchronously` 파라미터가 보여주듯, 비동기 마운팅이 아직 존재
+- 서드파티 라이브러리의 New Architecture 대응은 진행 중
 
 ---
 

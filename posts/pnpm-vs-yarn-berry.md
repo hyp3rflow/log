@@ -3,7 +3,7 @@ title: "pnpm vs Yarn Berry"
 date: 2026/02/18
 description: "pnpm과 Yarn Berry의 내부 동작을 소스코드 레벨에서 비교 분석"
 tag: llm-study, Node, pnpm, Yarn, PackageManager
-author: flow
+author: Claude Opus 4.6
 ---
 
 # pnpm vs Yarn Berry — 패키지 매니저는 어떻게 패키지를 받는가
@@ -587,7 +587,7 @@ pnpm은 파일 단위 CAS이므로, N개 프로젝트에서 같은 패키지를 
 
 Yarn Berry는 프로젝트별 `.yarn/cache/`에 zip이 있고, 선택적으로 글로벌 미러 캐시도 있다. zero-install을 쓰면 git 저장소 크기가 늘어나는 트레이드오프가 있다.
 
-**결론**: 여러 프로젝트를 관리하는 개발자에게는 pnpm의 CAS가 디스크 절약 면에서 압도적이다.
+pnpm의 CAS는 여러 프로젝트에서 동일 패키지를 공유할 때 디스크 사용량 차이가 크다.
 
 ### CI 환경
 
@@ -628,25 +628,14 @@ pnpm은 workspace 패키지를 symlink로 연결한다. Yarn Berry는 PnP 맵에
 
 ---
 
-## 7. 결론
+## 7. 정리
 
-### 언제 pnpm을 쓸까
-
-- **여러 프로젝트**를 동시에 관리할 때: CAS 덕분에 디스크를 극적으로 절약한다
-- **호환성이 중요할 때**: symlink 기반이라 대부분의 도구와 잘 작동한다
-- **monorepo**: workspace 기능이 성숙하고, `--filter` 등 편의 기능이 풍부하다
-- **기존 npm 프로젝트 마이그레이션**: `pnpm import`로 npm lockfile을 변환할 수 있다
-
-### 언제 Yarn Berry를 쓸까
-
-- **zero-install**이 필요할 때: CI 시간 단축, 레지스트리 장애 대비
-- **엄격한 의존성 관리**가 필요할 때: PnP가 phantom dependency를 가장 확실하게 차단한다
-- **plugin 시스템**: Yarn Berry의 plugin 아키텍처는 커스터마이징이 필요한 대규모 조직에 유용하다
-
-### 개인적 의견
-
-나는 pnpm 유저다. 가장 큰 이유는 **호환성**과 **단순함**이다. symlink + 하드 링크는 파일 시스템의 기본 기능이므로 Node.js 런타임을 패치할 필요가 없고, 대부분의 도구가 별도 설정 없이 작동한다. CAS의 디스크 절약 효과도 체감이 크다.
-
-Yarn Berry의 PnP는 기술적으로 더 대담한 접근이고, zero-install 컨셉은 매력적이다. 하지만 호환성 이슈로 `packageExtensions`를 관리해야 하는 비용이 있고, `.pnp.cjs`가 에러를 던질 때 디버깅이 직관적이지 않은 경우가 있다.
-
-두 도구 모두 npm의 근본적 한계를 해결했다. 어떤 것을 선택하든, `npm install`의 평탄한 node_modules 시대보다는 훨씬 나은 선택이다.
+| | pnpm | Yarn Berry |
+|---|---|---|
+| **저장 방식** | Content-Addressable Store (하드링크) | zip 캐시 (`.yarn/cache/`) |
+| **node_modules** | symlink 기반 (.pnpm 가상 스토어) | PnP (node_modules 없음) |
+| **phantom dependency** | 비호이스팅으로 방지 | PnP로 완전 차단 |
+| **zero-install** | 미지원 | 지원 (캐시를 git에 커밋) |
+| **런타임 패치** | 불필요 | `.pnp.cjs`가 require를 패치 |
+| **monorepo** | workspace + `--filter` | workspace + plugin 시스템 |
+| **lockfile** | `pnpm-lock.yaml` | `yarn.lock` |
