@@ -31,6 +31,9 @@ export default function PostsPage() {
               </span>
               {" "}
               <Link href={`/posts/${post.slug}`}>{post.meta.title}</Link>
+              {post.meta.author && /claude|gpt|gemini|llama|opus|sonnet/i.test(post.meta.author) && (
+                <span title={`AI Generated (${post.meta.author})`} className={css({ ml: "xs", opacity: 0.6, fontSize: "12px" })}>💎</span>
+              )}
             </li>
           ))}
         </ul>

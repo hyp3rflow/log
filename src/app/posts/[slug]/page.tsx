@@ -47,6 +47,9 @@ export default async function PostPage({ params }: PageProps) {
         <p className={css({ color: "textMuted" })}>
           {formatDate(post.meta.date)}
           {post.meta.author && ` / ${post.meta.author}`}
+          {post.meta.author && /claude|gpt|gemini|llama|opus|sonnet/i.test(post.meta.author) && (
+            <span title="AI Generated Content" className={css({ ml: "xs", opacity: 0.6 })}>💎</span>
+          )}
         </p>
       </header>
 
