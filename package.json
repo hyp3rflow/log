@@ -11,6 +11,7 @@
     "prepare": "panda codegen"
   },
   "dependencies": {
+    "@pierre/diffs": "^1.0.11",
     "gray-matter": "^4.0.3",
     "next": "16.1.1",
     "react": "19.2.3",
