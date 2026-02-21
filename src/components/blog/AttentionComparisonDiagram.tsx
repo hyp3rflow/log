@@ -34,21 +34,26 @@ const sections: Section[] = [
   { title: "MQA", subtitle: "Multi-Query Attention", qCount: 8, kvCount: 1, barPct: 12.5, barLabel: "12.5%", barColor: COLORS.bar12 },
 ];
 
-function HeadSection({ section, offsetX }: { section: Section; offsetX: number }) {
-  const sectionW = 200;
+function HeadSection({ section, offsetX, sectionW }: { section: Section; offsetX: number; sectionW: number; }) {
   const cx = offsetX + sectionW / 2;
-  const headR = 10;
-  const qY = 60;
-  const kvY = 140;
-  const qSpacing = sectionW / (section.qCount + 1);
-  const kvSpacing = sectionW / (section.kvCount + 1);
+  const headR = 11;
+  const qY = 70;
+  const kvY = 155;
+  const pad = 20;
+  const usableW = sectionW - pad * 2;
+  const qSpacing = section.qCount > 1 ? usableW / (section.qCount - 1) : 0;
+  const kvSpacing = section.kvCount > 1 ? usableW / (section.kvCount - 1) : 0;
 
-  const qPositions = Array.from({ length: section.qCount }, (_, i) => offsetX + qSpacing * (i + 1));
-  const kvPositions = Array.from({ length: section.kvCount }, (_, i) => offsetX + kvSpacing * (i + 1));
+  const qPositions = Array.from({ length: section.qCount }, (_, i) =>
+    section.qCount === 1 ? cx : offsetX + pad + qSpacing * i
+  );
+  const kvPositions = Array.from({ length: section.kvCount }, (_, i) =>
+    section.kvCount === 1 ? cx : offsetX + pad + kvSpacing * i
+  );
 
-  // Group mapping lines
-  const lines: { x1: number; x2: number }[] = [];
+  // Group mapping
   const groupSize = section.qCount / section.kvCount;
+  const lines: { x1: number; x2: number }[] = [];
   for (let kv = 0; kv < section.kvCount; kv++) {
     for (let q = kv * groupSize; q < (kv + 1) * groupSize; q++) {
       lines.push({ x1: qPositions[q]!, x2: kvPositions[kv]! });
@@ -56,37 +61,37 @@ function HeadSection({ section, offsetX }: { section: Section; offsetX: number }
   }
 
   // Bar chart
-  const barY = 200;
-  const barMaxW = 160;
-  const barH = 18;
-  const barX = offsetX + (sectionW - barMaxW) / 2;
+  const barY = 210;
+  const barMaxW = sectionW - 40;
+  const barH = 20;
+  const barX = offsetX + 20;
 
   return (
     <g>
       {/* Title */}
-      <text x={cx} y={22} textAnchor="middle" fill={COLORS.text} fontSize={13} fontWeight={700} fontFamily="system-ui, sans-serif">
+      <text x={cx} y={22} textAnchor="middle" fill={COLORS.text} fontSize={14} fontWeight={700} fontFamily="system-ui, sans-serif">
         {section.title}
       </text>
-      <text x={cx} y={36} textAnchor="middle" fill="#777" fontSize={8} fontFamily="system-ui, sans-serif">
+      <text x={cx} y={38} textAnchor="middle" fill="#666" fontSize={9} fontFamily="system-ui, sans-serif">
         {section.subtitle}
       </text>
 
       {/* Q label */}
-      <text x={offsetX + 4} y={qY + 4} fill={COLORS.q} fontSize={9} fontWeight={600} fontFamily="system-ui, sans-serif">Q</text>
-
+      <text x={offsetX + 6} y={qY + 4} fill={COLORS.q} fontSize={10} fontWeight={600} fontFamily="system-ui, sans-serif">Q</text>
       {/* KV label */}
-      <text x={offsetX + 4} y={kvY + 4} fill={COLORS.kv} fontSize={9} fontWeight={600} fontFamily="system-ui, sans-serif">KV</text>
+      <text x={offsetX + 6} y={kvY + 4} fill={COLORS.kv} fontSize={10} fontWeight={600} fontFamily="system-ui, sans-serif">KV</text>
 
-      {/* Mapping lines */}
+      {/* Mapping lines (behind circles) */}
       {lines.map((l, i) => (
-        <line key={i} x1={l.x1} y1={qY + headR} x2={l.x2} y2={kvY - headR} stroke={COLORS.line} strokeWidth={0.8} opacity={0.6} />
+        <line key={i} x1={l.x1} y1={qY + headR + 2} x2={l.x2} y2={kvY - headR - 2}
+          stroke={COLORS.line} strokeWidth={1} opacity={0.5} />
       ))}
 
       {/* Q heads */}
       {qPositions.map((x, i) => (
         <g key={`q-${i}`}>
-          <circle cx={x} cy={qY} r={headR} fill={COLORS.q + "22"} stroke={COLORS.q} strokeWidth={1.2} />
-          <text x={x} y={qY + 3.5} textAnchor="middle" fill={COLORS.q} fontSize={7} fontFamily="system-ui, sans-serif">
+          <circle cx={x} cy={qY} r={headR} fill={COLORS.q + "22"} stroke={COLORS.q} strokeWidth={1.5} />
+          <text x={x} y={qY + 4} textAnchor="middle" fill={COLORS.q} fontSize={8} fontWeight={600} fontFamily="system-ui, sans-serif">
             {i}
           </text>
         </g>
@@ -95,20 +100,25 @@ function HeadSection({ section, offsetX }: { section: Section; offsetX: number }
       {/* KV heads */}
       {kvPositions.map((x, i) => (
         <g key={`kv-${i}`}>
-          <circle cx={x} cy={kvY} r={headR} fill={COLORS.kv + "22"} stroke={COLORS.kv} strokeWidth={1.2} />
-          <text x={x} y={kvY + 3.5} textAnchor="middle" fill={COLORS.kv} fontSize={7} fontFamily="system-ui, sans-serif">
+          <circle cx={x} cy={kvY} r={headR} fill={COLORS.kv + "22"} stroke={COLORS.kv} strokeWidth={1.5} />
+          <text x={x} y={kvY + 4} textAnchor="middle" fill={COLORS.kv} fontSize={8} fontWeight={600} fontFamily="system-ui, sans-serif">
             {i}
           </text>
         </g>
       ))}
 
       {/* KV Cache bar */}
-      <text x={cx} y={barY - 4} textAnchor="middle" fill="#888" fontSize={8} fontFamily="system-ui, sans-serif">
+      <text x={cx} y={barY - 6} textAnchor="middle" fill="#777" fontSize={9} fontFamily="system-ui, sans-serif">
         KV Cache Size
       </text>
-      <rect x={barX} y={barY} width={barMaxW} height={barH} rx={4} fill="#222" stroke="#333" strokeWidth={0.5} />
-      <rect x={barX} y={barY} width={barMaxW * section.barPct / 100} height={barH} rx={4} fill={section.barColor + "66"} stroke={section.barColor} strokeWidth={1} />
-      <text x={barX + barMaxW * section.barPct / 100 / 2} y={barY + 13} textAnchor="middle" fill={section.barColor} fontSize={10} fontWeight={600} fontFamily="system-ui, sans-serif">
+      <rect x={barX} y={barY} width={barMaxW} height={barH} rx={4} fill="#1a1a1a" stroke="#333" strokeWidth={0.5} />
+      <rect x={barX} y={barY} width={barMaxW * section.barPct / 100} height={barH} rx={4}
+        fill={section.barColor + "44"} stroke={section.barColor} strokeWidth={1.2} />
+      <text
+        x={Math.max(barX + barMaxW * section.barPct / 100 / 2, barX + 20)}
+        y={barY + 14} textAnchor="middle" fill={section.barColor}
+        fontSize={10} fontWeight={700} fontFamily="system-ui, sans-serif"
+      >
         {section.barLabel}
       </text>
     </g>
@@ -116,9 +126,9 @@ function HeadSection({ section, offsetX }: { section: Section; offsetX: number }
 }
 
 export default function AttentionComparisonDiagram() {
-  const totalW = 640;
-  const totalH = 240;
-  const sectionW = totalW / 3;
+  const sectionW = 220;
+  const totalW = sectionW * 3;
+  const totalH = 250;
 
   return (
     <div style={WRAPPER}>
@@ -128,11 +138,11 @@ export default function AttentionComparisonDiagram() {
       <div style={{ overflowX: "auto" }}>
         <svg viewBox={`0 0 ${totalW} ${totalH}`} width="100%" style={{ maxWidth: totalW }}>
           {/* Separator lines */}
-          <line x1={sectionW} y1={10} x2={sectionW} y2={totalH - 10} stroke="#333" strokeWidth={1} />
-          <line x1={sectionW * 2} y1={10} x2={sectionW * 2} y2={totalH - 10} stroke="#333" strokeWidth={1} />
+          <line x1={sectionW} y1={10} x2={sectionW} y2={totalH - 10} stroke="#2a2a2a" strokeWidth={1} />
+          <line x1={sectionW * 2} y1={10} x2={sectionW * 2} y2={totalH - 10} stroke="#2a2a2a" strokeWidth={1} />
 
           {sections.map((s, i) => (
-            <HeadSection key={s.title} section={s} offsetX={i * sectionW + 6} />
+            <HeadSection key={s.title} section={s} offsetX={i * sectionW} sectionW={sectionW} />
           ))}
         </svg>
       </div>

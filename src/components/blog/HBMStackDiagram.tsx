@@ -8,7 +8,7 @@ const WRAPPER: React.CSSProperties = {
   margin: "2rem 0",
 };
 
-const COLORS = {
+const C = {
   dram: "#6eb5ff",
   tsv: "#f0a050",
   bump: "#c080f0",
@@ -18,165 +18,141 @@ const COLORS = {
   gddr: "#f9c74f",
   pcb: "#8a8a6a",
   text: "#ccc",
-  label: "#888",
+  label: "#777",
 };
 
-function GDDRSection() {
-  const x = 20;
-  const baseY = 260;
+function GDDRSide() {
+  const ox = 20; // offset x
+  const baseY = 220;
 
   return (
     <g>
-      <text x={160} y={20} textAnchor="middle" fill={COLORS.text} fontSize={13} fontWeight={700} fontFamily="system-ui, sans-serif">
+      <text x={150} y={24} textAnchor="middle" fill={C.text} fontSize={14} fontWeight={700} fontFamily="system-ui, sans-serif">
         GDDR (Conventional)
       </text>
 
-      {/* PCB */}
-      <rect x={x} y={baseY} width={280} height={30} rx={3} fill={COLORS.pcb + "33"} stroke={COLORS.pcb} strokeWidth={1} />
-      <text x={160} y={baseY + 19} textAnchor="middle" fill={COLORS.pcb} fontSize={9} fontFamily="system-ui, sans-serif">
+      {/* PCB Board */}
+      <rect x={ox} y={baseY} width={260} height={28} rx={3} fill={C.pcb + "22"} stroke={C.pcb} strokeWidth={1} />
+      <text x={ox + 130} y={baseY + 17} textAnchor="middle" fill={C.pcb} fontSize={9} fontFamily="system-ui, sans-serif">
         PCB (Wide Bus Traces)
       </text>
 
-      {/* GPU die */}
-      <rect x={x + 20} y={baseY - 50} width={80} height={40} rx={4} fill={COLORS.gpu + "22"} stroke={COLORS.gpu} strokeWidth={1.5} />
-      <text x={x + 60} y={baseY - 26} textAnchor="middle" fill={COLORS.gpu} fontSize={10} fontWeight={600} fontFamily="system-ui, sans-serif">
-        GPU
-      </text>
+      {/* GPU */}
+      <rect x={ox + 20} y={baseY - 55} width={90} height={45} rx={5} fill={C.gpu + "22"} stroke={C.gpu} strokeWidth={1.5} />
+      <text x={ox + 65} y={baseY - 28} textAnchor="middle" fill={C.gpu} fontSize={11} fontWeight={600} fontFamily="system-ui, sans-serif">GPU</text>
 
       {/* GDDR chip */}
-      <rect x={x + 160} y={baseY - 50} width={80} height={40} rx={4} fill={COLORS.gddr + "22"} stroke={COLORS.gddr} strokeWidth={1.5} />
-      <text x={x + 200} y={baseY - 32} textAnchor="middle" fill={COLORS.gddr} fontSize={10} fontWeight={600} fontFamily="system-ui, sans-serif">
-        GDDR6
-      </text>
-      <text x={x + 200} y={baseY - 18} textAnchor="middle" fill={COLORS.label} fontSize={7} fontFamily="system-ui, sans-serif">
-        Single Die
-      </text>
+      <rect x={ox + 145} y={baseY - 55} width={90} height={45} rx={5} fill={C.gddr + "22"} stroke={C.gddr} strokeWidth={1.5} />
+      <text x={ox + 190} y={baseY - 35} textAnchor="middle" fill={C.gddr} fontSize={11} fontWeight={600} fontFamily="system-ui, sans-serif">GDDR6</text>
+      <text x={ox + 190} y={baseY - 20} textAnchor="middle" fill={C.label} fontSize={8} fontFamily="system-ui, sans-serif">Single Die</text>
 
-      {/* Bus lines */}
-      {[0, 6, 12, 18].map((offset) => (
-        <line
-          key={offset}
-          x1={x + 100 + offset}
-          y1={baseY - 30}
-          x2={x + 160}
-          y2={baseY - 30}
-          stroke={COLORS.pcb}
-          strokeWidth={0.8}
-          opacity={0.5}
-        />
+      {/* Bus traces between GPU and GDDR */}
+      {[0, 8, 16, 24, 32].map((off) => (
+        <line key={off} x1={ox + 110} y1={baseY - 32 + off * 0.4}
+          x2={ox + 145} y2={baseY - 32 + off * 0.4}
+          stroke={C.pcb} strokeWidth={1} opacity={0.4} />
       ))}
-      <text x={x + 140} y={baseY - 38} textAnchor="middle" fill={COLORS.label} fontSize={7} fontFamily="system-ui, sans-serif">
+      <text x={ox + 128} y={baseY - 60} textAnchor="middle" fill={C.label} fontSize={8} fontFamily="system-ui, sans-serif">
         32-bit bus
       </text>
 
-      {/* Bandwidth */}
-      <rect x={x + 60} y={baseY + 45} width={200} height={24} rx={6} fill="#222" stroke="#444" strokeWidth={0.5} />
-      <text x={x + 160} y={baseY + 61} textAnchor="middle" fill={COLORS.gddr} fontSize={10} fontWeight={600} fontFamily="system-ui, sans-serif">
+      {/* Solder balls to PCB */}
+      {[40, 60, 80, 160, 180, 200].map((xp) => (
+        <circle key={xp} cx={ox + xp} cy={baseY - 4} r={2.5} fill={C.bump + "66"} stroke={C.bump} strokeWidth={0.5} />
+      ))}
+
+      {/* Bandwidth label */}
+      <rect x={ox + 20} y={baseY + 42} width={220} height={26} rx={6} fill="#1a1a1a" stroke="#333" strokeWidth={0.5} />
+      <text x={ox + 130} y={baseY + 59} textAnchor="middle" fill={C.gddr} fontSize={10} fontWeight={600} fontFamily="system-ui, sans-serif">
         ~900 GB/s (GDDR6X, 384-bit)
       </text>
     </g>
   );
 }
 
-function HBMSection() {
-  const x = 340;
-  const baseY = 260;
-  const dramH = 16;
-  const dramGap = 2;
+function HBMSide() {
+  const ox = 340;
+  const baseY = 220;
   const numDies = 8;
-  const stackW = 70;
-  const stackX = x + 140;
+  const dieH = 14;
+  const dieGap = 2;
+  const stackW = 80;
+  const stackX = ox + 145;
 
   return (
     <g>
-      <text x={x + 140} y={20} textAnchor="middle" fill={COLORS.text} fontSize={13} fontWeight={700} fontFamily="system-ui, sans-serif">
+      <text x={ox + 150} y={24} textAnchor="middle" fill={C.text} fontSize={14} fontWeight={700} fontFamily="system-ui, sans-serif">
         HBM (3D Stacked)
       </text>
 
       {/* Package Substrate */}
-      <rect x={x} y={baseY} width={280} height={30} rx={3} fill={COLORS.substrate + "33"} stroke={COLORS.substrate} strokeWidth={1} />
-      <text x={x + 140} y={baseY + 19} textAnchor="middle" fill={COLORS.substrate} fontSize={9} fontFamily="system-ui, sans-serif">
+      <rect x={ox} y={baseY} width={300} height={28} rx={3} fill={C.substrate + "22"} stroke={C.substrate} strokeWidth={1} />
+      <text x={ox + 150} y={baseY + 17} textAnchor="middle" fill={C.substrate} fontSize={9} fontFamily="system-ui, sans-serif">
         Package Substrate
       </text>
 
       {/* Silicon Interposer */}
-      <rect x={x + 10} y={baseY - 20} width={260} height={14} rx={2} fill={COLORS.interposer + "22"} stroke={COLORS.interposer} strokeWidth={1} />
-      <text x={x + 140} y={baseY - 10} textAnchor="middle" fill={COLORS.interposer} fontSize={7} fontFamily="system-ui, sans-serif">
+      <rect x={ox + 10} y={baseY - 22} width={280} height={16} rx={2} fill={C.interposer + "22"} stroke={C.interposer} strokeWidth={1} />
+      <text x={ox + 150} y={baseY - 11} textAnchor="middle" fill={C.interposer} fontSize={8} fontWeight={600} fontFamily="system-ui, sans-serif">
         Silicon Interposer
       </text>
 
-      {/* GPU die on interposer */}
-      <rect x={x + 20} y={baseY - 75} width={80} height={50} rx={4} fill={COLORS.gpu + "22"} stroke={COLORS.gpu} strokeWidth={1.5} />
-      <text x={x + 60} y={baseY - 46} textAnchor="middle" fill={COLORS.gpu} fontSize={10} fontWeight={600} fontFamily="system-ui, sans-serif">
-        GPU
-      </text>
+      {/* GPU on interposer */}
+      <rect x={ox + 20} y={baseY - 76} width={100} height={48} rx={5} fill={C.gpu + "22"} stroke={C.gpu} strokeWidth={1.5} />
+      <text x={ox + 70} y={baseY - 48} textAnchor="middle" fill={C.gpu} fontSize={11} fontWeight={600} fontFamily="system-ui, sans-serif">GPU</text>
 
       {/* Micro bumps under GPU */}
-      {[0, 12, 24, 36, 48, 60].map((offset) => (
-        <rect key={`gb-${offset}`} x={x + 28 + offset} y={baseY - 24} width={6} height={3} rx={1} fill={COLORS.bump + "66"} stroke={COLORS.bump} strokeWidth={0.5} />
+      {[0, 14, 28, 42, 56, 70].map((off) => (
+        <circle key={`gb-${off}`} cx={ox + 35 + off} cy={baseY - 25} r={2} fill={C.bump + "66"} stroke={C.bump} strokeWidth={0.5} />
       ))}
 
-      {/* HBM Stack */}
-      {/* Micro bumps at bottom of stack */}
-      {[0, 12, 24, 36, 48].map((offset) => (
-        <rect key={`hb-${offset}`} x={stackX + 8 + offset} y={baseY - 24} width={6} height={3} rx={1} fill={COLORS.bump + "66"} stroke={COLORS.bump} strokeWidth={0.5} />
-      ))}
-
-      {/* DRAM dies stacked */}
+      {/* HBM Stack - DRAM dies */}
       {Array.from({ length: numDies }, (_, i) => {
-        const dy = baseY - 30 - (i + 1) * (dramH + dramGap);
+        const dy = baseY - 28 - (i + 1) * (dieH + dieGap);
         return (
-          <g key={`dram-${i}`}>
-            <rect x={stackX} y={dy} width={stackW} height={dramH} rx={2} fill={COLORS.dram + "18"} stroke={COLORS.dram + "88"} strokeWidth={0.8} />
-            {i === numDies - 1 && (
-              <text x={stackX + stackW / 2} y={dy + 11} textAnchor="middle" fill={COLORS.dram} fontSize={7} fontFamily="system-ui, sans-serif">
-                DRAM Die
-              </text>
-            )}
-          </g>
+          <rect key={i} x={stackX} y={dy} width={stackW} height={dieH} rx={2}
+            fill={C.dram + "18"} stroke={C.dram + "66"} strokeWidth={0.8} />
         );
       })}
 
+      {/* Stack label on top */}
+      <text x={stackX + stackW / 2} y={baseY - 28 - numDies * (dieH + dieGap) - 8}
+        textAnchor="middle" fill={C.dram} fontSize={9} fontWeight={600} fontFamily="system-ui, sans-serif">
+        8-Hi DRAM Stack
+      </text>
+
       {/* TSV lines through stack */}
-      {[15, 35, 55].map((offset) => (
-        <line
-          key={`tsv-${offset}`}
-          x1={stackX + offset}
-          y1={baseY - 28}
-          x2={stackX + offset}
-          y2={baseY - 30 - numDies * (dramH + dramGap)}
-          stroke={COLORS.tsv}
-          strokeWidth={1}
-          strokeDasharray="3,2"
-          opacity={0.7}
-        />
+      {[20, 40, 60].map((off) => (
+        <line key={off}
+          x1={stackX + off} y1={baseY - 25}
+          x2={stackX + off} y2={baseY - 28 - numDies * (dieH + dieGap) + dieH}
+          stroke={C.tsv} strokeWidth={1.2} strokeDasharray="3,2" opacity={0.7} />
       ))}
 
-      {/* Labels with lines */}
-      {/* TSV label */}
-      <text x={stackX + stackW + 14} y={baseY - 100} fill={COLORS.tsv} fontSize={7} fontWeight={600} fontFamily="system-ui, sans-serif">
-        TSV
-      </text>
-      <line x1={stackX + stackW + 4} y1={baseY - 103} x2={stackX + stackW + 12} y2={baseY - 103} stroke={COLORS.tsv} strokeWidth={0.5} />
+      {/* Micro bumps under HBM stack */}
+      {[0, 14, 28, 42, 56].map((off) => (
+        <circle key={`hb-${off}`} cx={stackX + 12 + off} cy={baseY - 25} r={2} fill={C.bump + "66"} stroke={C.bump} strokeWidth={0.5} />
+      ))}
 
-      {/* Micro Bump label */}
-      <text x={stackX + stackW + 14} y={baseY - 20} fill={COLORS.bump} fontSize={7} fontWeight={600} fontFamily="system-ui, sans-serif">
-        Micro Bump
-      </text>
+      {/* Labels */}
+      <g>
+        {/* TSV label */}
+        <line x1={stackX + stackW + 4} y1={baseY - 100} x2={stackX + stackW + 14} y2={baseY - 100} stroke={C.tsv} strokeWidth={0.8} />
+        <text x={stackX + stackW + 17} y={baseY - 97} fill={C.tsv} fontSize={8} fontWeight={600} fontFamily="system-ui, sans-serif">TSV</text>
 
-      {/* Stack label */}
-      <text x={stackX + stackW / 2} y={baseY - 30 - numDies * (dramH + dramGap) - 6} textAnchor="middle" fill={COLORS.dram} fontSize={8} fontWeight={600} fontFamily="system-ui, sans-serif">
-        8-Hi Stack
-      </text>
+        {/* Micro Bump label */}
+        <line x1={stackX + stackW + 4} y1={baseY - 25} x2={stackX + stackW + 14} y2={baseY - 25} stroke={C.bump} strokeWidth={0.8} />
+        <text x={stackX + stackW + 17} y={baseY - 22} fill={C.bump} fontSize={8} fontWeight={600} fontFamily="system-ui, sans-serif">Micro Bump</text>
+      </g>
 
-      {/* 1024-bit label between GPU and HBM on interposer */}
-      <text x={x + 115} y={baseY - 28} textAnchor="middle" fill={COLORS.interposer} fontSize={7} fontFamily="system-ui, sans-serif">
+      {/* 1024-bit label on interposer between GPU and HBM */}
+      <text x={ox + 120} y={baseY - 30} textAnchor="middle" fill={C.interposer} fontSize={7} fontFamily="system-ui, sans-serif">
         1024-bit
       </text>
 
-      {/* Bandwidth */}
-      <rect x={x + 40} y={baseY + 45} width={200} height={24} rx={6} fill="#222" stroke="#444" strokeWidth={0.5} />
-      <text x={x + 140} y={baseY + 61} textAnchor="middle" fill={COLORS.interposer} fontSize={10} fontWeight={600} fontFamily="system-ui, sans-serif">
+      {/* Bandwidth label */}
+      <rect x={ox + 40} y={baseY + 42} width={220} height={26} rx={6} fill="#1a1a1a" stroke="#333" strokeWidth={0.5} />
+      <text x={ox + 150} y={baseY + 59} textAnchor="middle" fill={C.interposer} fontSize={10} fontWeight={600} fontFamily="system-ui, sans-serif">
         ~3,350 GB/s (HBM3, H100)
       </text>
     </g>
@@ -184,8 +160,8 @@ function HBMSection() {
 }
 
 export default function HBMStackDiagram() {
-  const totalW = 640;
-  const totalH = 310;
+  const totalW = 660;
+  const totalH = 300;
 
   return (
     <div style={WRAPPER}>
@@ -195,10 +171,9 @@ export default function HBMStackDiagram() {
       <div style={{ overflowX: "auto" }}>
         <svg viewBox={`0 0 ${totalW} ${totalH}`} width="100%" style={{ maxWidth: totalW }}>
           {/* Divider */}
-          <line x1={320} y1={10} x2={320} y2={totalH - 10} stroke="#333" strokeWidth={1} strokeDasharray="6,4" />
-
-          <GDDRSection />
-          <HBMSection />
+          <line x1={325} y1={10} x2={325} y2={totalH - 10} stroke="#2a2a2a" strokeWidth={1} strokeDasharray="6,4" />
+          <GDDRSide />
+          <HBMSide />
         </svg>
       </div>
     </div>
