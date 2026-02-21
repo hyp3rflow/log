@@ -53,6 +53,8 @@ Hochreiter & Schmidhuber[^1]가 제안한 LSTM은 **forget gate**, **input gate*
 
 Bahdanau et al.[^2]은 디코더가 인코더의 **모든 hidden state를 참조**할 수 있는 attention 메커니즘을 제안했다. 디코더가 매 단계마다 인코더의 어떤 위치에 집중할지 가중치를 계산한다. 이것이 attention의 시작이다. 그러나 인코더와 디코더 모두 여전히 RNN 기반이었다.
 
+<SeqModelsDiagram />
+
 ---
 
 ## 3. Self-Attention — 모든 토큰을 한 번에
