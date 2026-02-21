@@ -15,6 +15,7 @@ import LLMMemoryCalculator from "@/components/blog/LLMMemoryCalculator";
 import TransformerDecoderDiagram from "@/components/blog/TransformerDecoderDiagram";
 import AttentionComparisonDiagram from "@/components/blog/AttentionComparisonDiagram";
 import HBMStackDiagram from "@/components/blog/HBMStackDiagram";
+import RNNvsTransformerDiagram from "@/components/blog/RNNvsTransformerDiagram";
 import Math from "@/components/blog/Math";
 
 function langFromClassName(className?: string): string | undefined {
@@ -146,6 +147,7 @@ const mdxComponents = {
   TransformerDecoderDiagram,
   AttentionComparisonDiagram,
   HBMStackDiagram,
+  RNNvsTransformerDiagram,
   Math,
   table({ children, ...props }: React.ComponentProps<"table">) {
     return (
