@@ -18,7 +18,7 @@ author: Claude Opus 4.6
 
 입력 시퀀스 길이를 n, hidden dimension을 d라 하면, Query·Key·Value 행렬을 만들고 다음을 계산한다:
 
-**Attention(Q, K, V) = softmax(QKᵀ / √d_k) · V**
+<Math display expr='"Attention"(Q, K, V) = "softmax"((Q K^T) / sqrt(d_k)) dot V' />
 
 이 연산의 시간 복잡도는 O(n² · d)이다. QKᵀ 행렬의 크기는 n × n이므로, 시퀀스 길이가 길어지면 **메모리 사용량이 제곱으로 증가**한다.
 
@@ -87,7 +87,7 @@ Self-Attention 연산 자체는 **순서에 무관(permutation invariant)**하�
 
 원래 Transformer[^1]는 위치마다 고정된 sin/cos 벡터를 만들어 임베딩에 **더했다**:
 
-**PE(pos, 2i) = sin(pos / 10000^(2i/d))**
+<Math display expr='"PE"("pos", 2i) = sin("pos" / 10000^(2i\/d))' />
 
 이 방식은 **절대 위치(absolute position)**를 인코딩한다. 학습 시 본 시퀀스 길이(예: 512)를 넘어서면 본 적 없는 위치 벡터가 되어 **일반화가 어렵다**. 또한 두 토큰 사이의 상대적 거리를 직접적으로 표현하지 않는다.
 
@@ -95,18 +95,15 @@ Self-Attention 연산 자체는 **순서에 무관(permutation invariant)**하�
 
 Su et al.(2021)이 제안한 RoPE[^6]는 근본적으로 다른 접근을 취한다. 임베딩에 값을 더하는 대신, **Query와 Key 벡터를 위치에 따라 회전**시킨다:
 
-**f(x_m, m) = x_m · e^(imθ)**
+<Math display expr='f(x_m, m) = x_m dot e^(i m theta)' />
 
 이를 2차원 쌍으로 풀어쓰면, hidden dimension의 연속된 두 원소 (x₂ᵢ, x₂ᵢ₊₁)를 각도 mθᵢ만큼 회전시키는 것이다:
 
-```
-[cos(mθ)  -sin(mθ)] [x₂ᵢ  ]
-[sin(mθ)   cos(mθ)] [x₂ᵢ₊₁]
-```
+<Math display expr='mat(cos(m theta), -sin(m theta); sin(m theta), cos(m theta)) mat(x_(2i); x_(2i+1))' />
 
 이 방식의 핵심 성질은 **두 토큰의 attention score가 상대 거리에만 의존**한다는 것이다:
 
-**f(q_m)ᵀ · f(k_n) = g(x_m, x_n, m−n)**
+<Math display expr='f(q_m)^T dot f(k_n) = g(x_m, x_n, m - n)' />
 
 즉 절대 위치가 아닌 **상대 위치**를 자연스럽게 인코딩한다. Sinusoidal이 "나는 위치 5에 있다"라고 알려준다면, RoPE는 "나는 저 토큰보다 3칸 뒤에 있다"를 인코딩하는 셈이다.
 
@@ -116,7 +113,7 @@ RoPE의 실용적 장점은 **컨텍스트 확장**에 있다. 학습 시 4K 토
 
 Press et al.(2022)이 제안한 ALiBi[^7]는 더 급진적인 접근이다. **위치 임베딩을 아예 사용하지 않는다.** 대신, attention score에 거리에 비례하는 선형 penalty를 직접 더한다:
 
-**softmax(qᵢ · kⱼ − m · |i − j|)**
+<Math display expr='"softmax"(q_i dot k_j - m dot |i - j|)' />
 
 여기서 m은 head마다 다른 상수(기하급수적으로 감소)이다. 멀리 있는 토큰일수록 attention score가 낮아지도록 유도하는 것이다. 학습된 파라미터가 없으므로 학습 없이도 더 긴 시퀀스로 외삽이 가능하다. BLOOM (176B)[^8] 모델이 ALiBi를 사용했다.
 
