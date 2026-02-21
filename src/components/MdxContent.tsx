@@ -145,6 +145,13 @@ const mdxComponents = {
   TransformerDecoderDiagram,
   AttentionComparisonDiagram,
   HBMStackDiagram,
+  table({ children, ...props }: React.ComponentProps<"table">) {
+    return (
+      <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+        <table {...props}>{children}</table>
+      </div>
+    );
+  },
   code({
     className,
     children,
