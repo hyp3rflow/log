@@ -1,21 +1,27 @@
-<svg class="typst-doc" viewBox="0 0 36.4126 17.962" width="43.7" height="21.6" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:h5="http://www.w3.org/1999/xhtml">
+<svg class="typst-doc" viewBox="0 0 43.4126 17.962" width="65.1" height="26.9" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:h5="http://www.w3.org/1999/xhtml">
     <g>
         <g class="typst-group">
             <g>
-                <g class="typst-text" transform="matrix(1 0 0 -1 4.2 13.496000000000002)">
+                <g class="typst-text" transform="matrix(1 0 0 -1 4.2 13.761999999999999)">
+                    <use xlink:href="#g83F12C86A7847D5B9BB035322702EC71" x="0" y="0" fill="#000000" fill-rule="nonzero"/>
+                </g>
+                <g class="typst-text" transform="matrix(1 0 0 -1 11.200000000000001 13.496000000000002)">
                     <use xlink:href="#gBDAE6C26263F6D87DE798F7EECE6417E" x="0" y="0" fill="#000000" fill-rule="nonzero"/>
                 </g>
-                <path class="typst-shape" fill="none" stroke="#000000" stroke-width="0.672" stroke-linecap="butt" stroke-linejoin="miter" stroke-miterlimit="4" transform="matrix(1 0 0 1 18.2 1.932000000000001)" d="M 0 0h 14.0126 "/>
-                <g class="typst-text" transform="matrix(1 0 0 -1 18.2 13.761999999999999)">
+                <path class="typst-shape" fill="none" stroke="#000000" stroke-width="0.672" stroke-linecap="butt" stroke-linejoin="miter" stroke-miterlimit="4" transform="matrix(1 0 0 1 25.2 1.932000000000001)" d="M 0 0h 14.0126 "/>
+                <g class="typst-text" transform="matrix(1 0 0 -1 25.2 13.761999999999999)">
                     <use xlink:href="#g670051D6A05F383C728227D3CFBA85FF" x="0" y="0" fill="#000000" fill-rule="nonzero"/>
                 </g>
-                <g class="typst-text" transform="matrix(1 0 0 -1 25.48 17.219999999999995)">
+                <g class="typst-text" transform="matrix(1 0 0 -1 32.48 17.219999999999995)">
                     <use xlink:href="#gA1EA5F8BAF0C51E8DBF1B75574053D5" x="0" y="0" fill="#000000" fill-rule="nonzero"/>
                 </g>
             </g>
         </g>
     </g>
     <defs id="glyph">
+        <symbol id="g83F12C86A7847D5B9BB035322702EC71" overflow="visible">
+            <path d="M 0 0m 6.216 10.052 c 0.013999939 0.027999878 0.013999939 0.07000065 0.013999939 0.112000465 c 0 0.22399998 -0.11199999 0.3359995 -0.33599997 0.3359995 c -0.1539998 0 -0.25199986 -0.069999695 -0.3080001 -0.22399998 l -4.788 -13.328 c -0.013999999 -0.028000116 -0.013999999 -0.06999993 -0.013999999 -0.11199999 c 0 -0.22399998 0.11199999 -0.33599997 0.33599997 -0.33599997 c 0.15400004 0 0.2520001 0.06999993 0.3080001 0.22399998 Z "/>
+        </symbol>
         <symbol id="gBDAE6C26263F6D87DE798F7EECE6417E" overflow="visible">
             <path d="M 0 0m 14.182 11.298 c 0.07000065 0.14000034 0.09800053 0.22399998 0.09800053 0.2659998 c 0 0.22399998 -0.112000465 0.33600044 -0.33600044 0.33600044 c -0.13999939 0 -0.25199986 -0.09800053 -0.34999943 -0.30800056 l -7.1120005 -14.854 l -2.9400003 6.846 l -2.03 -1.5680001 l 0.27999997 -0.30799997 l 0.98 0.742 l 3.1500003 -7.3500004 c 0.43400002 0 0.5319996 0.013999939 0.658 0.3080001 Z "/>
         </symbol>

@@ -31,11 +31,11 @@ ${wrapped}`;
     timeout: 5000,
   });
 
-  // Keep width/height but convert pt to reasonable px (1pt ≈ 1.33px, scale down slightly)
+  const scale = display ? 1.3 : 1.5;
   return svg
     .replace(/<path[^>]*fill="#ffffff"[^>]*\/>/g, "")
-    .replace(/width="([\d.]+)pt"/, (_, w) => `width="${(parseFloat(w) * 1.2).toFixed(1)}"`)
-    .replace(/height="([\d.]+)pt"/, (_, h) => `height="${(parseFloat(h) * 1.2).toFixed(1)}"`);
+    .replace(/width="([\d.]+)pt"/, (_, w) => `width="${(parseFloat(w) * scale).toFixed(1)}"`)
+    .replace(/height="([\d.]+)pt"/, (_, h) => `height="${(parseFloat(h) * scale).toFixed(1)}"`);
 }
 
 function getCachedOrRender(expr: string, display: boolean): string {
