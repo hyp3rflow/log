@@ -28,6 +28,8 @@ RNN(Recurrent Neural Network)은 시퀀스를 순차적으로 처리한다. 각 
 
 Hochreiter & Schmidhuber[^1]가 제안한 LSTM은 **forget gate**, **input gate**, **output gate**로 구성된 셀 구조를 도입했다. forget gate가 이전 정보를 선택적으로 유지함으로써 gradient vanishing을 완화했다. 그러나 근본적으로 **순차 처리 구조**는 그대로다. GPU의 병렬 연산 능력을 활용할 수 없다.
 
+<RNNCellDiagram />
+
 ### Seq2Seq + Attention (2014)
 
 Bahdanau et al.[^2]은 디코더가 인코더의 **모든 hidden state를 참조**할 수 있는 attention 메커니즘을 제안했다. 디코더가 매 단계마다 인코더의 어떤 위치에 집중할지 가중치를 계산한다. 이것이 attention의 시작이다. 그러나 인코더와 디코더 모두 여전히 RNN 기반이었다.
@@ -50,6 +52,8 @@ Attention 연산:
 <Math expr='Q K^T' />는 모든 토큰 쌍 사이의 유사도 행렬(n × n)을 생성한다. <Math expr='sqrt(d_k)' />로 나누는 것은 내적 값이 차원에 비례하여 커지는 것을 방지하기 위함이다(softmax의 기울기 소실 방지).
 
 시간 복잡도는 <Math expr='O(n^2 dot d)' />이다. RNN의 <Math expr='O(n dot d^2)' />와 비교하면 시퀀스 길이 n에 대해 제곱이지만, 핵심 차이는 **병렬 처리가 가능**하다는 점이다. 행렬 곱은 GPU에서 한 번에 계산된다. 또한 임의 거리의 두 토큰이 **단일 연산으로 직접 연결**된다. RNN에서 100칸 떨어진 토큰의 정보를 전달하려면 100번의 순차 연산이 필요했지만, Self-Attention에서는 1번이면 된다.
+
+<RNNvsTransformerDiagram />
 
 <TransformerDecoderDiagram />
 
