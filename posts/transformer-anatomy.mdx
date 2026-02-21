@@ -8,9 +8,28 @@ author: Claude Opus 4.6
 
 # Transformer는 왜 이렇게 생겼는가
 
-Transformer는 여러 구성요소의 조합이다. 각 구성요소는 특정 문제를 해결하기 위해 존재한다. 이 글에서는 RNN의 한계에서 출발하여, Transformer의 각 부품이 왜 그 자리에 있는지를 분석한다.
+## 1. 문제 정의 — 시퀀스를 이해한다는 것
 
-## 1. Transformer 이전 — RNN과 LSTM
+언어는 **순서가 있는 기호의 나열**이다. "고양이가 쥐를 쫓는다"와 "쥐가 고양이를 쫓는다"는 같은 단어를 쓰지만 의미가 다르다. 기계가 언어를 처리하려면 두 가지 핵심 능력이 필요하다:
+
+1. **순서 인식**: 토큰의 위치와 순서에 따라 의미가 달라진다.
+2. **문맥 파악**: 하나의 토큰은 주변 토큰에 따라 의미가 바뀐다. "배"는 "과일 배"와 "타는 배"에서 다른 뜻이다.
+
+이 문제를 각 세대의 모델이 어떻게 풀었는지 정리하면:
+
+| | 순서 인식 | 문맥 파악 | 병렬 처리 | 장기 의존성 |
+|---|---|---|---|---|
+| **RNN** (1986) | 순차 처리로 자연스럽게 | 이전 hidden state에 압축 | ✗ 불가 | ✗ gradient 소실 |
+| **LSTM** (1997) | 순차 처리 | gate로 선택적 기억/망각 | ✗ 불가 | △ 개선됨, 한계 있음 |
+| **Transformer** (2017) | 위치 인코딩으로 주입 | Attention으로 모든 토큰 직접 참조 | ✓ 완전 병렬 | ✓ 거리 무관 |
+
+RNN은 순서를 자연스럽게 인식하지만 병렬화가 불가능하고 먼 토큰을 기억하지 못한다. LSTM은 기억력을 개선했지만 순차 구조는 그대로다. Transformer는 순서 인식을 포기하는 대신(위치 인코딩으로 보완), 병렬 처리와 장기 의존성을 동시에 해결했다.
+
+각 모델이 이전 모델의 어떤 한계를 극복하려 했는지, 구조를 뜯어보면서 확인한다.
+
+---
+
+## 2. RNN과 LSTM — 순차 처리의 한계
 
 ### RNN의 기본 구조
 
@@ -36,7 +55,7 @@ Bahdanau et al.[^2]은 디코더가 인코더의 **모든 hidden state를 참조
 
 ---
 
-## 2. Self-Attention — 모든 토큰을 한 번에
+## 3. Self-Attention — 모든 토큰을 한 번에
 
 2017년, Vaswani et al.[^3]은 "Attention Is All You Need"에서 RNN을 완전히 제거하고 **attention만으로** 시퀀스를 처리하는 Transformer를 제안했다.
 
@@ -59,7 +78,7 @@ Attention 연산:
 
 ---
 
-## 3. Multi-Head Attention
+## 4. Multi-Head Attention
 
 단일 attention은 하나의 관점만 포착한다. 예를 들어 "The cat sat on the mat because it was tired"에서 "it"이 "cat"을 가리키는 관계와, "sat on the mat"이라는 구문 관계는 서로 다른 유형의 패턴이다.
 
@@ -69,7 +88,7 @@ Multi-Head Attention은 attention을 h개의 **head**로 분할한다. 각 head�
 
 ---
 
-## 4. Residual Connection이 필요한 이유
+## 5. Residual Connection이 필요한 이유
 
 He et al.[^4]이 2015년 ResNet에서 보인 것처럼, 깊은 네트워크는 **degradation problem**을 겪는다. 레이어를 쌓을수록 오히려 성능이 떨어진다. 이는 과적합이 아니라, 최적화 자체가 어려워지는 현상이다.
 
@@ -81,7 +100,7 @@ Residual connection은 이를 해결한다:
 
 ---
 
-## 5. Feed-Forward Network가 필요한 이유
+## 6. Feed-Forward Network가 필요한 이유
 
 Transformer 블록은 두 부분으로 구성된다:
 1. **Self-Attention**: 토큰 간 정보를 **섞는다** (mixing)
@@ -99,7 +118,7 @@ Geva et al.[^5]은 FFN이 사실상 **key-value memory**로 동작함을 보였�
 
 ---
 
-## 6. Layer Normalization
+## 7. Layer Normalization
 
 ### Batch Norm vs Layer Norm
 
@@ -115,7 +134,7 @@ Ba et al.[^6]이 제안한 **Layer Normalization**은 단일 샘플 내에서 �
 
 ---
 
-## 7. Positional Encoding
+## 8. Positional Encoding
 
 Self-Attention은 본질적으로 **순서를 모른다**. <Math expr='"softmax"(Q K^T) dot V' /> 연산에서 토큰의 순서를 바꿔도 결과가 동일하다(permutation invariant). "나는 밥을 먹는다"와 "밥을 나는 먹는다"를 구분할 수 없다. RNN은 순차 처리 자체가 순서 정보를 인코딩했지만, Transformer는 이를 **외부에서 주입**해야 한다.
 
@@ -129,7 +148,7 @@ Self-Attention은 본질적으로 **순서를 모른다**. <Math expr='"softmax"
 
 ---
 
-## 8. KV Cache — 추론의 메모리 병목
+## 9. KV Cache — 추론의 메모리 병목
 
 Autoregressive 생성에서 모델은 한 번에 하나의 토큰을 생성한다. t번째 토큰을 생성할 때, 이전 t-1개 토큰의 Key와 Value를 다시 계산하는 것은 낭비다. 이를 캐싱하는 것이 **KV Cache**다.
 
@@ -157,7 +176,7 @@ KV Cache는 LLM 추론에서 **메모리가 병목이 되는 핵심 원인**이�
 
 ---
 
-## 9. 결론
+## 10. 결론
 
 Transformer의 각 구성요소는 특정 문제를 해결하기 위해 존재한다:
 
