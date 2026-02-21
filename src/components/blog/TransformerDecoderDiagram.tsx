@@ -40,6 +40,15 @@ const blocks: Block[] = [
   { label: "Input Embedding", color: COLORS.embedding },
 ];
 
+const legends: { label: string; color: string; desc: string }[] = [
+  { label: "Input Embedding", color: COLORS.embedding, desc: "토큰 ID를 d차원 벡터로 변환. 어휘 크기 V × hidden dim d의 가중치 행렬." },
+  { label: "Positional Encoding", color: COLORS.embedding, desc: "토큰의 순서 정보를 주입. RoPE는 Q·K에 회전 행렬을 적용해 상대 위치를 인코딩한다." },
+  { label: "Masked Self-Attention", color: COLORS.attention, desc: "각 토큰이 이전 토큰들만 참조. Q·Kᵀ로 attention score를 구하고, V를 가중합한다. 추론 시 이전 토큰의 K·V를 재사용하는 것이 KV Cache." },
+  { label: "Feed-Forward Network", color: COLORS.ffn, desc: "토큰별 독립적인 2-layer MLP. 최신 모델은 SwiGLU 활성화를 사용하며, hidden dim의 약 2.7배로 확장 후 축소." },
+  { label: "Add & Norm", color: COLORS.norm, desc: "Residual connection + Layer Normalization. 입력을 그대로 더해(skip connection) 그래디언트 소실을 방지." },
+  { label: "Linear → Softmax", color: COLORS.output, desc: "hidden state를 어휘 크기 V로 투영 후 확률 분포로 변환. 다음 토큰을 예측한다." },
+];
+
 export default function TransformerDecoderDiagram() {
   const W = 380;
   const bw = 200;
@@ -195,6 +204,23 @@ export default function TransformerDecoderDiagram() {
             stroke={COLORS.arrow} strokeWidth={1.5} markerEnd="url(#tdd-arrow)"
           />
         </svg>
+      </div>
+
+      {/* Legend */}
+      <div style={{ marginTop: "20px", display: "flex", flexDirection: "column", gap: "10px" }}>
+        {legends.map((l) => (
+          <div key={l.label} style={{ display: "flex", gap: "10px", alignItems: "flex-start" }}>
+            <div style={{
+              minWidth: "8px", width: "8px", height: "8px", borderRadius: "2px",
+              background: l.color + "44", border: `1.5px solid ${l.color}88`,
+              marginTop: "4px",
+            }} />
+            <div>
+              <span style={{ color: l.color, fontSize: "12px", fontWeight: 600 }}>{l.label}</span>
+              <span style={{ color: "#888", fontSize: "12px" }}> — {l.desc}</span>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
