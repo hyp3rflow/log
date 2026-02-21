@@ -200,17 +200,46 @@ JEDEC 표준 기준으로 HBM의 세대별 스펙은 다음과 같다[^13]:
 2. **채널 분할**: HBM3부터 128-bit 채널을 64-bit pseudo-channel로 분할하여 독립 접근성 향상.
 3. **핀 속도**: 10년간 1.0 → 9.8 Gb/s로 약 10배 향상.
 
-### 3.3 HBF (High Bandwidth Fan-out)
+### 3.3 HBF (High Bandwidth Flash)
 
-SK하이닉스가 2024년에 발표한 **HBF (High Bandwidth Fan-out)**는 기존 TSV 기반 HBM의 한계를 보완하는 패키징 기술이다[^14]. 기존에는 실리콘 인터포저(silicon interposer)를 통해 HBM 스택과 프로세서를 연결했다. 인터포저는 고가이고 면적 제약이 있다.
+삼성이 발표한 **HBF (High Bandwidth Flash)**는 **NAND 플래시 메모리를 HBM과 유사한 방식으로 3D 적층**하여 대역폭을 극대화한 새로운 유형의 메모리이다[^14].
 
-HBF는 **팬아웃 웨이퍼 레벨 패키징(FOWLP)** 기술을 사용하여 인터포저 없이 HBM 다이를 직접 재배선층(RDL)으로 연결한다. 이로 인해:
+#### HBM은 DRAM, HBF는 NAND Flash
 
-- 패키징 비용 절감
-- 더 많은 HBM 스택을 프로세서에 연결 가능
-- 열 관리 개선 (적층 높이 감소 가능)
+HBM이 DRAM 다이를 TSV로 수직 적층해 대역폭을 높였듯이, HBF는 **V-NAND(3D NAND) 다이를 TSV로 적층**하여 기존 SSD 대비 대역폭을 대폭 향상시킨다. 핵심 차이는 메모리 유형이다:
 
-HBF는 HBM4 세대부터 본격 적용될 것으로 예상된다.
+| | HBM | HBF |
+|---|---|---|
+| 메모리 유형 | DRAM (휘발성) | NAND Flash (비휘발성) |
+| 특성 | 빠른 접근 속도, 비쌈, 작은 용량 | 느리지만, 저렴, 대용량 |
+| 역할 | 모델 가중치 + KV Cache (연산 메모리) | 모델 가중치 저장 + 로딩 (스토리지) |
+| 대역폭 | ~1,200 GB/s (HBM3E/스택) | 기존 SSD 대비 수 배 향상 |
+| 인터페이스 | GPU 다이에 직접 연결 | 프로세서 패키지 근접 배치 |
+
+#### 왜 HBF가 필요한가
+
+LLM의 규모가 커지면서 두 가지 문제가 동시에 발생한다:
+
+1. **HBM 용량 한계**: 모델이 수백 GB에 달하면 HBM만으로는 부족하다. MoE 모델(예: Mixtral 8x7B, ~93 GB FP16)은 특히 그렇다.
+2. **SSD는 너무 느리다**: NVMe SSD의 대역폭은 7~14 GB/s 수준으로, HBM의 수백~수천 GB/s에 비해 100배 이상 느리다.
+
+HBF는 이 격차를 메우는 **중간 계층** 역할을 한다. HBM에 올리기엔 너무 크고, SSD에서 읽기엔 너무 느린 데이터 — 예를 들어 MoE에서 현재 활성화되지 않은 Expert의 가중치 — 를 HBF에 배치할 수 있다. GPU가 필요할 때 HBF에서 빠르게 로딩하는 구조다.
+
+#### 메모리 계층의 확장
+
+HBF의 등장으로 AI 추론 시스템의 메모리 계층이 확장된다:
+
+```
+GPU SRAM (~26 MB, ~40 TB/s) → 연산 중 임시 데이터
+         ↓
+HBM (~192 GB, ~8 TB/s) → 활성 가중치 + KV Cache
+         ↓
+HBF (수 TB급, 수십~수백 GB/s) → 비활성 Expert, 대형 모델 가중치
+         ↓
+NVMe SSD (수십 TB, ~14 GB/s) → 체크포인트, 데이터셋
+```
+
+HBF는 아직 초기 단계이나, LLM의 규모가 계속 커지는 추세에서 HBM과 SSD 사이의 대역폭 격차를 줄이는 핵심 기술이 될 가능성이 있다.
 
 ### 3.4 NVIDIA GPU 세대별 대응
 
@@ -301,6 +330,6 @@ HBF는 HBM4 세대부터 본격 적용될 것으로 예상된다.
 
 [^13]: JEDEC. High Bandwidth Memory (HBM) DRAM standards: JESD235, JESD235A, JESD235B, JESD235C, JESD235D. [jedec.org](https://www.jedec.org/)
 
-[^14]: SK hynix. "HBM Roadmap and Advanced Packaging Technologies." Hot Chips 2024.
+[^14]: Samsung Electronics. "Samsung Develops Industry's First High Bandwidth Flash (HBF) Memory for On-Device AI." Samsung Semiconductor Newsroom.
 
 [^15]: NVIDIA. Data Center GPU product specifications. [nvidia.com/en-us/data-center](https://www.nvidia.com/en-us/data-center/)
