@@ -38,7 +38,7 @@ function CellBox({ x, y, w, h, label, color }: { x: number; y: number; w: number
       <rect x={x} y={y} width={w} height={h} rx={6}
         fill={color + "15"} stroke={color + "66"} strokeWidth={1.2} />
       <text x={x + w / 2} y={y + h / 2 + 4} textAnchor="middle"
-        fill={color} fontSize={10} fontWeight={600} fontFamily={F}>
+        fill={color} fontSize={12} fontWeight={600} fontFamily={F}>
         {label}
       </text>
     </g>
@@ -47,18 +47,18 @@ function CellBox({ x, y, w, h, label, color }: { x: number; y: number; w: number
 
 /* ─────────── RNN Full Model ─────────── */
 function RNNModel() {
-  const W = 480;
+  const W = 600;
   const tokens = ["x₁", "x₂", "x₃", "x₄"];
   const outputs = ["y₁", "y₂", "y₃", "y₄"];
   const n = tokens.length;
-  const cellW = 56;
-  const cellH = 34;
-  const gap = (W - 60) / n;
-  const startX = 50;
+  const cellW = 72;
+  const cellH = 42;
+  const gap = (W - 80) / n;
+  const startX = 60;
 
   // 2 layers
-  const layer1Y = 140;
-  const layer2Y = 80;
+  const layer1Y = 170;
+  const layer2Y = 95;
 
   return (
     <div style={{ marginBottom: 28 }}>
@@ -66,12 +66,12 @@ function RNNModel() {
         RNN — 2-Layer, 4 time steps
       </div>
       <div style={{ overflowX: "auto" }}>
-        <svg viewBox={`0 0 ${W} 210`} width="100%" style={{ maxWidth: W }}>
+        <svg viewBox={`0 0 ${W} 260`} width="100%" style={{ maxWidth: W }}>
           <defs><Marker id="seq-arr" /></defs>
 
           {/* Layer labels */}
-          <text x={12} y={layer1Y + cellH / 2 + 3} fill={C.label} fontSize={9} fontFamily={F}>Layer 1</text>
-          <text x={12} y={layer2Y + cellH / 2 + 3} fill={C.label} fontSize={9} fontFamily={F}>Layer 2</text>
+          <text x={14} y={layer1Y + cellH / 2 + 4} fill={C.label} fontSize={11} fontFamily={F}>Layer 1</text>
+          <text x={14} y={layer2Y + cellH / 2 + 4} fill={C.label} fontSize={11} fontFamily={F}>Layer 2</text>
 
           {tokens.map((tok, i) => {
             const cx = startX + i * gap;
@@ -79,8 +79,8 @@ function RNNModel() {
             return (
               <g key={i}>
                 {/* Input */}
-                <text x={cx + cellW / 2} y={195} textAnchor="middle" fill={C.input} fontSize={10} fontFamily={F}>{tok}</text>
-                <Arr x1={cx + cellW / 2} y1={184} x2={cx + cellW / 2} y2={layer1Y + cellH + 2} />
+                <text x={cx + cellW / 2} y={242} textAnchor="middle" fill={C.input} fontSize={12} fontFamily={F}>{tok}</text>
+                <Arr x1={cx + cellW / 2} y1={230} x2={cx + cellW / 2} y2={layer1Y + cellH + 2} />
 
                 {/* Layer 1 cell */}
                 <CellBox x={cx} y={layer1Y} w={cellW} h={cellH} label="RNN" color={C.hidden} />
@@ -92,8 +92,8 @@ function RNNModel() {
                 <CellBox x={cx} y={layer2Y} w={cellW} h={cellH} label="RNN" color={C.hidden} />
 
                 {/* Output */}
-                <text x={cx + cellW / 2} y={46} textAnchor="middle" fill={C.output} fontSize={10} fontFamily={F}>{outputs[i]}</text>
-                <Arr x1={cx + cellW / 2} y1={layer2Y - 2} x2={cx + cellW / 2} y2={52} />
+                <text x={cx + cellW / 2} y={50} textAnchor="middle" fill={C.output} fontSize={12} fontFamily={F}>{outputs[i]}</text>
+                <Arr x1={cx + cellW / 2} y1={layer2Y - 2} x2={cx + cellW / 2} y2={56} />
 
                 {/* Horizontal arrows (h_t → h_{t+1}) in both layers */}
                 {i < n - 1 && (
@@ -119,20 +119,20 @@ function RNNModel() {
 
 /* ─────────── Seq2Seq + Attention ─────────── */
 function Seq2SeqModel() {
-  const W = 560;
+  const W = 680;
   const encTokens = ["I", "love", "cats", "<EOS>"];
   const decTokens = ["<SOS>", "나는", "고양이를", "좋아해"];
   const decOutputs = ["나는", "고양이를", "좋아해", "<EOS>"];
-  const cellW = 52;
-  const cellH = 34;
-  const encGap = 62;
-  const decGap = 62;
-  const encStartX = 30;
-  const decStartX = W - 30 - (decTokens.length - 1) * decGap - cellW;
+  const cellW = 66;
+  const cellH = 42;
+  const encGap = 78;
+  const decGap = 78;
+  const encStartX = 36;
+  const decStartX = W - 36 - (decTokens.length - 1) * decGap - cellW;
 
-  const encY = 160;
-  const decY = 160;
-  const ctxY = 90;
+  const encY = 190;
+  const decY = 190;
+  const ctxY = 100;
 
   return (
     <div>
@@ -140,14 +140,14 @@ function Seq2SeqModel() {
         Seq2Seq + Attention — Encoder-Decoder 구조
       </div>
       <div style={{ overflowX: "auto" }}>
-        <svg viewBox={`0 0 ${W} 280`} width="100%" style={{ maxWidth: W }}>
+        <svg viewBox={`0 0 ${W} 320`} width="100%" style={{ maxWidth: W }}>
           <defs><Marker id="seq-arr" /></defs>
 
           {/* Encoder label */}
           <rect x={encStartX - 8} y={encY - 12} width={encTokens.length * encGap + 8} height={cellH + 24}
             rx={8} fill="none" stroke={C.hidden + "33"} strokeWidth={1} strokeDasharray="6,3" />
           <text x={encStartX + (encTokens.length * encGap) / 2} y={encY - 20}
-            textAnchor="middle" fill={C.hidden} fontSize={11} fontWeight={600} fontFamily={F}>
+            textAnchor="middle" fill={C.hidden} fontSize={13} fontWeight={600} fontFamily={F}>
             Encoder (Bidirectional LSTM)
           </text>
 
@@ -156,7 +156,7 @@ function Seq2SeqModel() {
             const cx = encStartX + i * encGap;
             return (
               <g key={`enc-${i}`}>
-                <text x={cx + cellW / 2} y={230} textAnchor="middle" fill={C.input} fontSize={10} fontFamily={F}>{tok}</text>
+                <text x={cx + cellW / 2} y={270} textAnchor="middle" fill={C.input} fontSize={12} fontFamily={F}>{tok}</text>
                 <Arr x1={cx + cellW / 2} y1={218} x2={cx + cellW / 2} y2={encY + cellH + 2} />
                 <CellBox x={cx} y={encY} w={cellW} h={cellH} label="LSTM" color={C.hidden} />
                 {i < encTokens.length - 1 && (
@@ -170,7 +170,7 @@ function Seq2SeqModel() {
           <rect x={decStartX - 8} y={decY - 12} width={decTokens.length * decGap + 8} height={cellH + 24}
             rx={8} fill="none" stroke={C.output + "33"} strokeWidth={1} strokeDasharray="6,3" />
           <text x={decStartX + (decTokens.length * decGap) / 2} y={decY - 20}
-            textAnchor="middle" fill={C.output} fontSize={11} fontWeight={600} fontFamily={F}>
+            textAnchor="middle" fill={C.output} fontSize={13} fontWeight={600} fontFamily={F}>
             Decoder (LSTM + Attention)
           </text>
 
@@ -179,7 +179,7 @@ function Seq2SeqModel() {
             const cx = decStartX + i * decGap;
             return (
               <g key={`dec-${i}`}>
-                <text x={cx + cellW / 2} y={230} textAnchor="middle" fill={C.input} fontSize={9} fontFamily={F}>{tok}</text>
+                <text x={cx + cellW / 2} y={270} textAnchor="middle" fill={C.input} fontSize={12} fontFamily={F}>{tok}</text>
                 <Arr x1={cx + cellW / 2} y1={218} x2={cx + cellW / 2} y2={decY + cellH + 2} />
                 <CellBox x={cx} y={decY} w={cellW} h={cellH} label="LSTM" color={C.output} />
                 {/* Output */}
@@ -196,7 +196,7 @@ function Seq2SeqModel() {
           <rect x={decStartX} y={ctxY} width={decTokens.length * decGap - decGap + cellW} height={20}
             rx={4} fill={C.attention + "15"} stroke={C.attention + "55"} strokeWidth={1} />
           <text x={decStartX + (decTokens.length * decGap - decGap + cellW) / 2} y={ctxY + 13}
-            textAnchor="middle" fill={C.attention} fontSize={9} fontWeight={600} fontFamily={F}>
+            textAnchor="middle" fill={C.attention} fontSize={11} fontWeight={600} fontFamily={F}>
             Context (Attention-weighted sum of encoder states)
           </text>
 
