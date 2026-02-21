@@ -31,7 +31,7 @@ ${wrapped}`;
     timeout: 5000,
   });
 
-  const scale = display ? 1.3 : 1.5;
+  const scale = 1.2;
   return svg
     .replace(/<path[^>]*fill="#ffffff"[^>]*\/>/g, "")
     .replace(/width="([\d.]+)pt"/, (_, w) => `width="${(parseFloat(w) * scale).toFixed(1)}"`)
