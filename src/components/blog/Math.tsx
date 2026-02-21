@@ -22,7 +22,7 @@ function hashExpr(expr: string, display: boolean): string {
 function renderTypstToSVG(expr: string, display: boolean): string {
   const wrapped = display ? `$ ${expr} $` : `$${expr}$`;
   const src = `#set page(width: auto, height: auto, margin: 0.3em, fill: none)
-#set text(fill: rgb("#ccc"), size: ${display ? "14pt" : "12pt"})
+#set text(fill: rgb("#000"), size: ${display ? "16pt" : "14pt"})
 ${wrapped}`;
 
   const svg = execSync(`typst compile - /dev/stdout --format svg`, {
