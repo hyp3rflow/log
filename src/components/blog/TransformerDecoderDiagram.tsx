@@ -98,7 +98,7 @@ export default function TransformerDecoderDiagram() {
           <text x={cx} y={24} textAnchor="middle" fill={COLORS.output} fontSize={12} fontWeight={600} fontFamily="system-ui, sans-serif">
             Output Probabilities
           </text>
-          <line x1={cx} y1={32} x2={cx} y2={yPositions[0]!} stroke={COLORS.arrow} strokeWidth={1.5} markerEnd="url(#tdd-arrow)" />
+          <line x1={cx} y1={yPositions[0]!} x2={cx} y2={32} stroke={COLORS.arrow} strokeWidth={1.5} markerEnd="url(#tdd-arrow)" />
 
           {/* Blocks */}
           {blocks.map((b, i) => (
@@ -126,12 +126,12 @@ export default function TransformerDecoderDiagram() {
             </g>
           ))}
 
-          {/* Arrows between consecutive blocks (top to bottom = downward) */}
+          {/* Arrows between consecutive blocks (pointing upward: data flows bottom→top) */}
           {blocks.map((_, i) => {
             if (i >= blocks.length - 1) return null;
-            const y1 = yPositions[i]! + bh; // bottom of current block
-            const y2 = yPositions[i + 1]!;   // top of next block
-            if (y2 - y1 < 4) return null;
+            const y1 = yPositions[i + 1]!;    // top of lower block
+            const y2 = yPositions[i]! + bh;   // bottom of upper block
+            if (y1 - y2 < 4) return null;
             return (
               <line key={`arr-${i}`}
                 x1={cx} y1={y1} x2={cx} y2={y2}
@@ -153,33 +153,33 @@ export default function TransformerDecoderDiagram() {
             N×
           </text>
 
-          {/* Residual connection around Masked Self-Attention (block 6 → block 5) */}
+          {/* Residual connection around Masked Self-Attention: bypasses Attn, feeds into Add&Norm */}
           {(() => {
-            const resX = left + bw + 12;
-            const startY = yPositions[6]! + bh / 2;  // mid of Masked Attn
-            const endY = yPositions[5]! + bh / 2;    // mid of Add & Norm
+            const resX = left + bw + 14;
+            const bottomY = yPositions[6]! + bh / 2;  // mid of Masked Attn (lower)
+            const topY = yPositions[5]! + bh / 2;     // mid of Add & Norm (upper)
             return (
               <g>
                 <path
-                  d={`M${left + bw},${startY} L${resX},${startY} L${resX},${endY} L${left + bw},${endY}`}
+                  d={`M${left + bw},${bottomY} L${resX},${bottomY} L${resX},${topY} L${left + bw},${topY}`}
                   fill="none" stroke={COLORS.residual} strokeWidth={1} strokeDasharray="4,3"
                   markerEnd="url(#tdd-res)"
                 />
-                <text x={resX + 4} y={(startY + endY) / 2 + 3} fill={COLORS.residual} fontSize={7} fontFamily="system-ui, sans-serif">
+                <text x={resX + 4} y={(bottomY + topY) / 2 + 3} fill={COLORS.residual} fontSize={7} fontFamily="system-ui, sans-serif">
                   residual
                 </text>
               </g>
             );
           })()}
 
-          {/* Residual connection around FFN (block 4 → block 3) */}
+          {/* Residual connection around FFN: bypasses FFN, feeds into Add&Norm */}
           {(() => {
-            const resX = left + bw + 12;
-            const startY = yPositions[4]! + bh / 2;
-            const endY = yPositions[3]! + bh / 2;
+            const resX = left + bw + 14;
+            const bottomY = yPositions[4]! + bh / 2;  // mid of FFN (lower)
+            const topY = yPositions[3]! + bh / 2;     // mid of Add & Norm (upper)
             return (
               <path
-                d={`M${left + bw},${startY} L${resX},${startY} L${resX},${endY} L${left + bw},${endY}`}
+                d={`M${left + bw},${bottomY} L${resX},${bottomY} L${resX},${topY} L${left + bw},${topY}`}
                 fill="none" stroke={COLORS.residual} strokeWidth={1} strokeDasharray="4,3"
                 markerEnd="url(#tdd-res)"
               />
@@ -192,7 +192,7 @@ export default function TransformerDecoderDiagram() {
           </text>
           <line
             x1={cx} y1={totalH - 20} x2={cx} y2={yPositions[blocks.length - 1]! + bh}
-            stroke={COLORS.arrow} strokeWidth={1.5} markerEnd="url(#tdd-arrow-up)"
+            stroke={COLORS.arrow} strokeWidth={1.5} markerEnd="url(#tdd-arrow)"
           />
         </svg>
       </div>
