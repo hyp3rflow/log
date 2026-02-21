@@ -1,0 +1,261 @@
+---
+title: "LLM 아키텍처 발전과 하드웨어 메모리의 공진화"
+date: 2026/02/21
+description: "Transformer 아키텍처의 메모리 병목을 해결해온 소프트웨어·하드웨어 혁신을 사실 기반으로 정리"
+tag: llm-study
+author: Claude Opus 4.6
+---
+
+# LLM 아키텍처 발전과 하드웨어 메모리의 공진화
+
+## 1. Transformer 기본 구조 — 왜 메모리가 병목인가
+
+2017년 Vaswani et al.이 발표한 "Attention Is All You Need"[^1]는 RNN/LSTM을 대체하는 Transformer 구조를 제안했다. 핵심은 **Self-Attention** 메커니즘이다.
+
+### 1.1 Self-Attention 연산
+
+입력 시퀀스 길이를 n, hidden dimension을 d라 하면, Query·Key·Value 행렬을 만들고 다음을 계산한다:
+
+**Attention(Q, K, V) = softmax(QKᵀ / √d_k) · V**
+
+이 연산의 시간 복잡도는 O(n² · d)이다. QKᵀ 행렬의 크기는 n × n이므로, 시퀀스 길이가 길어지면 **메모리 사용량이 제곱으로 증가**한다.
+
+### 1.2 KV Cache — 추론 시 메모리 소비의 주범
+
+Autoregressive 추론에서는 매 토큰 생성 시 이전 토큰들의 Key, Value를 재사용한다. 이를 **KV Cache**라 한다.
+
+KV Cache 크기는 다음과 같이 계산된다:
+
+```
+KV Cache = 2 × L × n_kv_heads × d_head × seq_len × batch × precision
+```
+
+- `2`: Key와 Value 각각
+- `L`: Transformer 레이어 수
+- `n_kv_heads`: KV Head 수 (MHA에서는 전체 head 수)
+- `d_head`: head당 차원 (= hidden_dim / num_heads)
+- `seq_len`: 시퀀스 길이
+- `precision`: 바이트 수 (FP16 = 2바이트)
+
+예를 들어 LLaMA 3 70B (80 layers, 64 heads, d=8192, GQA 8 KV heads)를 FP16으로 8192 토큰 추론하면:
+
+```
+KV Cache = 2 × 80 × 8 × 128 × 8192 × 1 × 2 = 2.68 GB
+```
+
+모델 가중치(140 GB, FP16)와 합하면 **142.68 GB**의 VRAM이 필요하다. 배치 크기를 늘리면 KV Cache가 선형으로 증가한다. 이것이 LLM 서빙에서 메모리가 병목이 되는 핵심 이유다.
+
+### 1.3 연산량 분석
+
+Forward pass의 FLOPs는 대략 2 × N × P (N=토큰 수, P=파라미터 수)로 추정된다[^2]. 70B 모델의 8192 토큰 forward pass는 약 1.15 PFLOPs이다. 그러나 실제로는 **연산보다 메모리 대역폭이 먼저 한계에 도달**한다. GPU의 연산 능력(TFLOPs)은 빠르게 증가했지만, 메모리 대역폭은 그에 비해 느리게 성장했기 때문이다. 이를 **Memory Wall** 문제라 한다.
+
+<LLMMemoryCalculator />
+
+---
+
+## 2. 아키텍처 발전 — 메모리 병목을 소프트웨어로 해결하기
+
+### 2.1 Multi-Head → Multi-Query → Grouped-Query Attention
+
+**Multi-Head Attention (MHA)**는 원래 Transformer 논문에서 제안된 방식이다. 모든 head가 독립적인 Q, K, V 프로젝션을 가진다. Head 수가 h이면 KV Cache도 h에 비례한다.
+
+**Multi-Query Attention (MQA)**는 2019년 Shazeer가 제안했다[^3]. 모든 head가 **하나의 K, V를 공유**한다. KV Cache가 h분의 1로 줄어든다. 그러나 품질 저하가 관측되었다.
+
+**Grouped-Query Attention (GQA)**는 2023년 Ainslie et al.이 제안했다[^4]. h개의 Query head를 g개의 그룹으로 나누고, 각 그룹이 하나의 KV head를 공유한다. MHA와 MQA의 중간 지점이다.
+
+```
+MHA:  KV heads = h       (예: 64)
+GQA:  KV heads = g       (예: 8)   → KV Cache 87.5% 절감
+MQA:  KV heads = 1                  → KV Cache 98.4% 절감
+```
+
+LLaMA 3는 GQA를 채택하여 8B 모델은 8개, 70B 모델도 8개의 KV head를 사용한다[^5]. 이로 인해 KV Cache 크기가 MHA 대비 87.5% 줄어들면서도 품질 저하는 미미하다.
+
+### 2.2 위치 인코딩 — RoPE와 ALiBi
+
+원래 Transformer는 **sinusoidal positional encoding**을 사용했다. 학습 시 본 시퀀스 길이를 넘어서면 일반화가 어려웠다.
+
+**Rotary Position Embedding (RoPE)**는 Su et al.(2021)이 제안했다[^6]. Query와 Key에 회전 행렬을 적용하여 상대적 위치 정보를 인코딩한다. 핵심 수식은:
+
+**f(x_m, m) = x_m · e^(imθ)**
+
+RoPE의 장점은 **NTK-aware scaling**, **YaRN** 등의 기법으로 학습 시 컨텍스트 길이를 넘어서는 외삽(extrapolation)이 가능하다는 것이다. LLaMA, Qwen, Mistral 등 대부분의 최신 모델이 RoPE를 사용한다.
+
+**ALiBi (Attention with Linear Biases)**는 Press et al.(2022)이 제안했다[^7]. 위치 임베딩을 아예 제거하고, attention score에 거리에 비례하는 선형 bias를 더한다:
+
+**softmax(qᵢ · kⱼ − m · |i − j|)**
+
+ALiBi는 학습 없이도 더 긴 시퀀스로 외삽이 가능하다. BLOOM (176B) 모델이 ALiBi를 사용했다[^8].
+
+긴 컨텍스트 지원은 메모리 관점에서 중요하다. 시퀀스 길이가 4K에서 128K로 32배 늘어나면, KV Cache도 32배 증가한다. 위치 인코딩의 발전이 없었다면 이 정도의 컨텍스트 확장은 불가능했을 것이다.
+
+### 2.3 Mixture of Experts (MoE) — 파라미터는 늘리고 연산량은 유지
+
+Shazeer et al.(2017)이 제안한 MoE 개념[^9]은 최근 Mixtral 8x7B[^10], GPT-4 (추정), DeepSeek-V2 등에서 활발히 사용된다.
+
+MoE의 핵심:
+- FFN 레이어를 E개의 Expert로 복제
+- 각 토큰은 **Router**가 선택한 top-k개의 Expert만 활성화
+- 총 파라미터 수는 크지만, 토큰당 활성 파라미터 수는 작다
+
+Mixtral 8x7B의 경우:
+- 총 파라미터: 46.7B (8개 Expert × FFN 파라미터)
+- 활성 파라미터: 12.9B (top-2 Expert 선택)
+- Dense 13B 모델과 비슷한 연산량으로 더 높은 성능
+
+메모리 관점에서 MoE의 트레이드오프는 명확하다. **모든 Expert의 가중치를 메모리에 올려야 하지만**, 추론 시 연산량(FLOPs)은 줄어든다. 즉 MoE는 연산 효율은 높이지만, VRAM 요구량은 줄이지 않는다 (오히려 늘린다). 이것이 대용량 메모리 하드웨어의 필요성을 더욱 강화한다.
+
+### 2.4 Flash Attention — IO 복잡도의 혁신
+
+Dao et al.(2022)이 제안한 Flash Attention[^11]은 attention 연산의 **메모리 IO**를 최적화한다.
+
+표준 attention은 n × n attention 행렬을 HBM에 materialize한다. Flash Attention은 이를 **타일(tile) 단위로 분할**하여 GPU SRAM(on-chip memory)에서 계산한 뒤, softmax를 online으로 처리한다 (online softmax trick).
+
+| | 표준 Attention | Flash Attention |
+|---|---|---|
+| HBM 읽기/쓰기 | O(n²) | O(n²d / M) |
+| SRAM 사용 | O(n²) | O(M) |
+| 속도 (A100, 2K seq) | 1× | 2.4× |
+| 속도 (A100, 4K seq) | 1× | 4.3× |
+
+여기서 M은 SRAM 크기이다. A100의 SRAM은 20 MB (192 KB × 108 SM), HBM은 80 GB이다. Flash Attention은 이 **수천 배의 대역폭 차이**를 활용한다.
+
+Flash Attention 2[^12] (2023)는 parallelism을 개선하여 A100에서 이론 최대 대역폭의 72%를 달성했다. Flash Attention 3 (2024)는 H100의 FP8 Tensor Core와 비동기 연산을 활용한다.
+
+---
+
+## 3. 하드웨어 발전 — GPU 메모리의 진화
+
+### 3.1 GPU 메모리 벽: DRAM → GDDR → HBM
+
+GPU 메모리의 역사는 대역폭과의 전쟁이다.
+
+- **GDDR5** (2008): 핀당 5 Gbps, 32-bit 인터페이스. 512-bit 버스의 GPU에서 최대 약 336 GB/s.
+- **GDDR6** (2018): 핀당 16 Gbps, 32-bit 인터페이스. 게이밍 GPU에서 약 900 GB/s.
+
+그러나 GDDR은 **핀 수 한계**가 있다. 대역폭을 높이려면 버스 폭을 넓혀야 하는데, PCB 배선이 물리적으로 한계에 도달한다. 이 문제를 해결한 것이 **HBM (High Bandwidth Memory)**이다.
+
+HBM은 DRAM 다이를 수직으로 적층(3D stacking)하고, **TSV (Through-Silicon Via)**로 연결한다. 한 스택의 버스 폭이 1024-bit (HBM1/2) 또는 2048-bit (HBM4)로, GDDR의 32배 이상이다.
+
+### 3.2 HBM 세대별 진화
+
+JEDEC 표준 기준으로 HBM의 세대별 스펙은 다음과 같다[^13]:
+
+| 세대 | 표준 연도 | 핀당 속도 | 스택 구성 | 최대 용량/스택 | 최대 대역폭/스택 |
+|---|---|---|---|---|---|
+| **HBM1** | 2013 | 1.0 Gb/s | 4-Hi, 8×128bit | 4 GB | 128 GB/s |
+| **HBM2** | 2016 | 2.4 Gb/s | 8-Hi, 8×128bit | 8 GB | 307 GB/s |
+| **HBM2E** | 2019 | 3.6 Gb/s | 12-Hi, 8×128bit | 24 GB | 461 GB/s |
+| **HBM3** | 2022 | 6.4 Gb/s | 12-Hi, 16×64bit | 48 GB | 819 GB/s |
+| **HBM3E** | 2023 | 9.8 Gb/s | 16-Hi, 16×64bit | 48 GB | 1,229 GB/s |
+| **HBM4** | 2025 | 8.0 Gb/s | 16-Hi, 32×64bit | 64 GB | 2,048 GB/s |
+
+핵심 추세:
+1. **적층 수 증가**: 4-Hi → 8-Hi → 12-Hi → 16-Hi. 더 많은 다이를 쌓아 용량 확대.
+2. **채널 분할**: HBM3부터 128-bit 채널을 64-bit pseudo-channel로 분할하여 독립 접근성 향상.
+3. **핀 속도**: 10년간 1.0 → 9.8 Gb/s로 약 10배 향상.
+
+### 3.3 HBF (High Bandwidth Fan-out)
+
+SK하이닉스가 2024년에 발표한 **HBF (High Bandwidth Fan-out)**는 기존 TSV 기반 HBM의 한계를 보완하는 패키징 기술이다[^14]. 기존에는 실리콘 인터포저(silicon interposer)를 통해 HBM 스택과 프로세서를 연결했다. 인터포저는 고가이고 면적 제약이 있다.
+
+HBF는 **팬아웃 웨이퍼 레벨 패키징(FOWLP)** 기술을 사용하여 인터포저 없이 HBM 다이를 직접 재배선층(RDL)으로 연결한다. 이로 인해:
+
+- 패키징 비용 절감
+- 더 많은 HBM 스택을 프로세서에 연결 가능
+- 열 관리 개선 (적층 높이 감소 가능)
+
+HBF는 HBM4 세대부터 본격 적용될 것으로 예상된다.
+
+### 3.4 NVIDIA GPU 세대별 대응
+
+데이터센터 GPU의 메모리 스펙 변화는 LLM 발전과 직접 연결된다[^15]:
+
+| GPU | 출시 | 아키텍처 | 메모리 | 용량 | 대역폭 | FP16 성능 |
+|---|---|---|---|---|---|---|
+| **V100** | 2017 | Volta | HBM2 | 32 GB | 900 GB/s | 125 TFLOPS |
+| **A100** | 2020 | Ampere | HBM2E | 80 GB | 2,039 GB/s | 312 TFLOPS |
+| **H100** | 2022 | Hopper | HBM3 | 80 GB | 3,350 GB/s | 990 TFLOPS |
+| **H200** | 2024 | Hopper | HBM3E | 141 GB | 4,800 GB/s | 990 TFLOPS |
+| **B200** | 2024 | Blackwell | HBM3E | 192 GB | 8,000 GB/s | 2,250 TFLOPS |
+
+주목할 점:
+
+- **V100 → A100**: 메모리 32→80 GB (2.5×), 대역폭 900→2,039 GB/s (2.3×). 이 시기에 GPT-3 (175B)가 등장하여 다수의 GPU 병렬화가 필수가 되었다.
+- **A100 → H100**: 대역폭 2,039→3,350 GB/s (1.6×), FP16 성능 312→990 TFLOPS (3.2×). Transformer Engine 도입으로 FP8 학습 지원. Flash Attention이 이 하드웨어를 최대로 활용하는 소프트웨어가 되었다.
+- **H100 → H200**: 같은 Hopper 아키텍처지만 **메모리만 업그레이드** (80→141 GB, HBM3→HBM3E). 이는 LLM 서빙에서 메모리 용량이 병목임을 NVIDIA도 인식했다는 사실을 보여준다.
+- **B200**: 192 GB HBM3E, 8 TB/s 대역폭. 단일 GPU에 70B 모델(FP16 140GB)을 올릴 수 있게 되었다.
+
+---
+
+## 4. 공진화 — 아키텍처와 하드웨어의 상호 견인
+
+아키텍처 혁신과 하드웨어 발전은 독립적으로 이루어지지 않았다. 구체적인 사례를 정리한다.
+
+**하드웨어가 아키텍처를 가능하게 한 사례:**
+
+1. **HBM2 (2016) → Transformer (2017)**: HBM2의 등장으로 V100 GPU가 32 GB, 900 GB/s의 스펙을 달성했다. Transformer의 O(n²) attention이 실용적인 규모에서 학습 가능해졌다.
+
+2. **A100 80GB (2020) → GPT-3 175B (2020)**: A100의 80 GB HBM2E 없이는 175B 규모의 모델 학습이 현실적으로 불가능했다. 8-way 텐서 병렬로 모델을 분할해도 GPU당 최소 ~22 GB의 가중치 메모리가 필요했다.
+
+3. **H100의 SRAM 구조 → Flash Attention 3**: H100의 SM당 256 KB 공유 메모리(총 ~26 MB)는 Flash Attention의 타일 크기를 키울 수 있게 했다.
+
+**아키텍처가 하드웨어를 요구한 사례:**
+
+1. **KV Cache 폭증 → HBM 용량 증가**: 32K~128K 컨텍스트의 모델이 등장하면서, KV Cache만으로 수십 GB가 필요해졌다. H200의 141 GB, B200의 192 GB는 이 수요에 직접 대응한다.
+
+2. **MoE의 메모리 요구 → 대용량 VRAM**: Mixtral 8x7B의 46.7B 파라미터를 FP16으로 올리면 ~93 GB. 단일 GPU에 올리려면 H200급 이상이 필요하다.
+
+3. **Flash Attention의 IO 최적화 → HBM 대역폭 경쟁**: Flash Attention이 HBM 대역폭을 bottleneck으로 만들면서, 더 높은 대역폭의 HBM이 직접적인 성능 향상으로 이어지게 되었다.
+
+**소프트웨어 최적화가 하드웨어 요구를 완화한 사례:**
+
+1. **GQA → KV Cache 절감**: MHA에서 GQA로의 전환만으로 KV Cache가 87.5% 줄어들었다. 하드웨어 업그레이드 없이 같은 GPU에서 더 긴 컨텍스트를 처리할 수 있게 되었다.
+
+2. **양자화 (INT8/INT4) → 더 작은 GPU에서 추론 가능**: 4-bit 양자화로 70B 모델을 ~35 GB로 압축하면 A100 40GB에서도 추론이 가능하다.
+
+---
+
+## 5. 결론
+
+정리하면 다음과 같다:
+
+- Transformer의 attention 메커니즘은 O(n²) 메모리를 요구하며, autoregressive 추론의 KV Cache는 시퀀스 길이·배치·레이어 수에 비례하여 증가한다.
+- GQA는 KV Cache를 87.5% 절감하고, Flash Attention은 HBM IO를 O(n²)에서 O(n²d / M)으로 줄였다. MoE는 연산량을 줄이되 메모리는 더 요구한다.
+- HBM은 10년간 대역폭 128 GB/s → 2,048 GB/s (16×), 용량 4 GB → 64 GB (16×)로 발전했다.
+- NVIDIA 데이터센터 GPU는 V100 (32GB, 900 GB/s) → B200 (192GB, 8,000 GB/s)로 용량 6×, 대역폭 8.9× 증가했다.
+- 아키텍처 혁신과 하드웨어 발전은 단방향이 아니라 **상호 견인** 관계다. 아키텍처가 하드웨어의 한계를 노출하고, 하드웨어가 새로운 아키텍처를 가능하게 하는 순환이 반복되고 있다.
+
+---
+
+## References
+
+[^1]: Vaswani, A., et al. "Attention Is All You Need." NeurIPS 2017. [arXiv:1706.03762](https://arxiv.org/abs/1706.03762)
+
+[^2]: Kaplan, J., et al. "Scaling Laws for Neural Language Models." OpenAI, 2020. [arXiv:2001.08361](https://arxiv.org/abs/2001.08361)
+
+[^3]: Shazeer, N. "Fast Transformer Decoding: One Write-Head is All You Need." 2019. [arXiv:1911.02150](https://arxiv.org/abs/1911.02150)
+
+[^4]: Ainslie, J., et al. "GQA: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints." EMNLP 2023. [arXiv:2305.13245](https://arxiv.org/abs/2305.13245)
+
+[^5]: Meta. "LLaMA 3 Model Card." 2024. [llama.meta.com](https://llama.meta.com/)
+
+[^6]: Su, J., et al. "RoFormer: Enhanced Transformer with Rotary Position Embedding." 2021. [arXiv:2104.09864](https://arxiv.org/abs/2104.09864)
+
+[^7]: Press, O., Smith, N., Lewis, M. "Train Short, Test Long: Attention with Linear Biases Enables Input Length Extrapolation." ICLR 2022. [arXiv:2108.12409](https://arxiv.org/abs/2108.12409)
+
+[^8]: BigScience Workshop. "BLOOM: A 176B-Parameter Open-Access Multilingual Language Model." 2023. [arXiv:2211.05100](https://arxiv.org/abs/2211.05100)
+
+[^9]: Shazeer, N., et al. "Outrageously Large Neural Networks: The Sparsely-Gated Mixture-of-Experts Layer." ICLR 2017. [arXiv:1701.06538](https://arxiv.org/abs/1701.06538)
+
+[^10]: Jiang, A.Q., et al. "Mixtral of Experts." Mistral AI, 2024. [arXiv:2401.04088](https://arxiv.org/abs/2401.04088)
+
+[^11]: Dao, T., et al. "FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness." NeurIPS 2022. [arXiv:2205.14135](https://arxiv.org/abs/2205.14135)
+
+[^12]: Dao, T. "FlashAttention-2: Faster Attention with Better Parallelism and Work Partitioning." 2023. [arXiv:2307.08691](https://arxiv.org/abs/2307.08691)
+
+[^13]: JEDEC. High Bandwidth Memory (HBM) DRAM standards: JESD235, JESD235A, JESD235B, JESD235C, JESD235D. [jedec.org](https://www.jedec.org/)
+
+[^14]: SK hynix. "HBM Roadmap and Advanced Packaging Technologies." Hot Chips 2024.
+
+[^15]: NVIDIA. Data Center GPU product specifications. [nvidia.com/en-us/data-center](https://www.nvidia.com/en-us/data-center/)

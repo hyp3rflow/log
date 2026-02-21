@@ -11,6 +11,7 @@ import RNArchitectureDiagram from "@/components/blog/RNArchitectureDiagram";
 import JSICallFlow from "@/components/blog/JSICallFlow";
 import TurboModuleComparison from "@/components/blog/TurboModuleComparison";
 import FabricPipeline from "@/components/blog/FabricPipeline";
+import LLMMemoryCalculator from "@/components/blog/LLMMemoryCalculator";
 
 function langFromClassName(className?: string): string | undefined {
   if (!className) return undefined;
@@ -137,6 +138,7 @@ const mdxComponents = {
   JSICallFlow,
   TurboModuleComparison,
   FabricPipeline,
+  LLMMemoryCalculator,
   code({
     className,
     children,
