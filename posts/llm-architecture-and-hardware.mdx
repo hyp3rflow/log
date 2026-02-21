@@ -77,21 +77,60 @@ LLaMA 3는 GQA를 채택하여 8B 모델은 8개, 70B 모델도 8개의 KV head�
 
 ### 2.2 위치 인코딩 — RoPE와 ALiBi
 
-원래 Transformer는 **sinusoidal positional encoding**을 사용했다. 학습 시 본 시퀀스 길이를 넘어서면 일반화가 어려웠다.
+#### 왜 위치 인코딩이 필요한가
 
-**Rotary Position Embedding (RoPE)**는 Su et al.(2021)이 제안했다[^6]. Query와 Key에 회전 행렬을 적용하여 상대적 위치 정보를 인코딩한다. 핵심 수식은:
+Self-Attention 연산 자체는 **순서에 무관(permutation invariant)**하다. `softmax(QKᵀ)·V`에서 토큰의 순서를 바꿔도 결과가 동일하다. 즉 "나는 밥을 먹는다"와 "밥을 나는 먹는다"를 구분할 수 없다. 이는 RNN/LSTM이 순차적으로 처리하며 자연스럽게 순서를 인식하는 것과 근본적으로 다르다.
+
+따라서 Transformer는 위치 정보를 **외부에서 주입**해야 한다. 어떻게 주입하느냐에 따라 세 가지 방식으로 나뉜다:
+
+#### 1. Sinusoidal Positional Encoding (원래 Transformer)
+
+원래 Transformer[^1]는 위치마다 고정된 sin/cos 벡터를 만들어 임베딩에 **더했다**:
+
+**PE(pos, 2i) = sin(pos / 10000^(2i/d))**
+
+이 방식은 **절대 위치(absolute position)**를 인코딩한다. 학습 시 본 시퀀스 길이(예: 512)를 넘어서면 본 적 없는 위치 벡터가 되어 **일반화가 어렵다**. 또한 두 토큰 사이의 상대적 거리를 직접적으로 표현하지 않는다.
+
+#### 2. RoPE (Rotary Position Embedding)
+
+Su et al.(2021)이 제안한 RoPE[^6]는 근본적으로 다른 접근을 취한다. 임베딩에 값을 더하는 대신, **Query와 Key 벡터를 위치에 따라 회전**시킨다:
 
 **f(x_m, m) = x_m · e^(imθ)**
 
-RoPE의 장점은 **NTK-aware scaling**, **YaRN** 등의 기법으로 학습 시 컨텍스트 길이를 넘어서는 외삽(extrapolation)이 가능하다는 것이다. LLaMA, Qwen, Mistral 등 대부분의 최신 모델이 RoPE를 사용한다.
+이를 2차원 쌍으로 풀어쓰면, hidden dimension의 연속된 두 원소 (x₂ᵢ, x₂ᵢ₊₁)를 각도 mθᵢ만큼 회전시키는 것이다:
 
-**ALiBi (Attention with Linear Biases)**는 Press et al.(2022)이 제안했다[^7]. 위치 임베딩을 아예 제거하고, attention score에 거리에 비례하는 선형 bias를 더한다:
+```
+[cos(mθ)  -sin(mθ)] [x₂ᵢ  ]
+[sin(mθ)   cos(mθ)] [x₂ᵢ₊₁]
+```
+
+이 방식의 핵심 성질은 **두 토큰의 attention score가 상대 거리에만 의존**한다는 것이다:
+
+**f(q_m)ᵀ · f(k_n) = g(x_m, x_n, m−n)**
+
+즉 절대 위치가 아닌 **상대 위치**를 자연스럽게 인코딩한다. Sinusoidal이 "나는 위치 5에 있다"라고 알려준다면, RoPE는 "나는 저 토큰보다 3칸 뒤에 있다"를 인코딩하는 셈이다.
+
+RoPE의 실용적 장점은 **컨텍스트 확장**에 있다. 학습 시 4K 토큰으로 훈련한 모델을 32K나 128K로 확장할 때, **NTK-aware scaling**(θ의 base를 조정)이나 **YaRN**(주파수별 차등 스케일링)으로 외삽이 가능하다. LLaMA, Qwen, Mistral 등 대부분의 최신 모델이 RoPE를 사용한다.
+
+#### 3. ALiBi (Attention with Linear Biases)
+
+Press et al.(2022)이 제안한 ALiBi[^7]는 더 급진적인 접근이다. **위치 임베딩을 아예 사용하지 않는다.** 대신, attention score에 거리에 비례하는 선형 penalty를 직접 더한다:
 
 **softmax(qᵢ · kⱼ − m · |i − j|)**
 
-ALiBi는 학습 없이도 더 긴 시퀀스로 외삽이 가능하다. BLOOM (176B) 모델이 ALiBi를 사용했다[^8].
+여기서 m은 head마다 다른 상수(기하급수적으로 감소)이다. 멀리 있는 토큰일수록 attention score가 낮아지도록 유도하는 것이다. 학습된 파라미터가 없으므로 학습 없이도 더 긴 시퀀스로 외삽이 가능하다. BLOOM (176B)[^8] 모델이 ALiBi를 사용했다.
 
-긴 컨텍스트 지원은 메모리 관점에서 중요하다. 시퀀스 길이가 4K에서 128K로 32배 늘어나면, KV Cache도 32배 증가한다. 위치 인코딩의 발전이 없었다면 이 정도의 컨텍스트 확장은 불가능했을 것이다.
+#### 비교 정리
+
+| | Sinusoidal | RoPE | ALiBi |
+|---|---|---|---|
+| 위치 유형 | 절대 위치 | 상대 위치 | 상대 거리 bias |
+| 적용 위치 | 임베딩에 덧셈 | Q, K에 회전 | attention score에 덧셈 |
+| 학습 파라미터 | 없음 | 없음 | 없음 (m은 고정) |
+| 외삽 능력 | 약함 | NTK/YaRN으로 강함 | 기본적으로 강함 |
+| 채택 모델 | 원래 Transformer | LLaMA, Mistral, Qwen | BLOOM, MPT |
+
+긴 컨텍스트 지원은 메모리 관점에서도 중요하다. 시퀀스 길이가 4K에서 128K로 32배 늘어나면, KV Cache도 32배 증가한다. 위치 인코딩의 발전 — 특히 RoPE의 스케일링 기법 — 이 없었다면 이 정도의 컨텍스트 확장은 불가능했을 것이다.
 
 ### 2.3 Mixture of Experts (MoE) — 파라미터는 늘리고 연산량은 유지
 
