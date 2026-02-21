@@ -17,6 +17,7 @@ import AttentionComparisonDiagram from "@/components/blog/AttentionComparisonDia
 import HBMStackDiagram from "@/components/blog/HBMStackDiagram";
 import RNNvsTransformerDiagram from "@/components/blog/RNNvsTransformerDiagram";
 import Math from "@/components/blog/Math";
+import SelfAttentionDiagram from "@/components/blog/SelfAttentionDiagram";
 import RNNCellDiagram from "@/components/blog/RNNCellDiagram";
 
 function langFromClassName(className?: string): string | undefined {
@@ -151,6 +152,7 @@ const mdxComponents = {
   RNNvsTransformerDiagram,
   Math,
   RNNCellDiagram,
+  SelfAttentionDiagram,
   table({ children, ...props }: React.ComponentProps<"table">) {
     return (
       <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>

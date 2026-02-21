@@ -77,6 +77,8 @@ Q와 K의 내적이 높으면 "이 질문과 이 광고가 잘 맞다"는 뜻이
 
 <Math display expr='"Attention"(Q, K, V) = "softmax"((Q K^T) / sqrt(d_k)) dot V' />
 
+<SelfAttentionDiagram />
+
 연산 과정을 단계별로 보면:
 
 1. <Math expr='Q K^T' /> (n × n 행렬): 모든 토큰 쌍 사이의 **유사도 점수**를 계산한다. (i, j) 원소는 "토큰 i의 질문이 토큰 j의 광고와 얼마나 맞는가"를 나타낸다.
