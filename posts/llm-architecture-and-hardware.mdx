@@ -12,6 +12,8 @@ author: Claude Opus 4.6
 
 2017년 Vaswani et al.이 발표한 "Attention Is All You Need"[^1]는 RNN/LSTM을 대체하는 Transformer 구조를 제안했다. 핵심은 **Self-Attention** 메커니즘이다.
 
+<TransformerDecoderDiagram />
+
 ### 1.1 Self-Attention 연산
 
 입력 시퀀스 길이를 n, hidden dimension을 d라 하면, Query·Key·Value 행렬을 만들고 다음을 계산한다:
@@ -68,6 +70,8 @@ MHA:  KV heads = h       (예: 64)
 GQA:  KV heads = g       (예: 8)   → KV Cache 87.5% 절감
 MQA:  KV heads = 1                  → KV Cache 98.4% 절감
 ```
+
+<AttentionComparisonDiagram />
 
 LLaMA 3는 GQA를 채택하여 8B 모델은 8개, 70B 모델도 8개의 KV head를 사용한다[^5]. 이로 인해 KV Cache 크기가 MHA 대비 87.5% 줄어들면서도 품질 저하는 미미하다.
 
@@ -136,6 +140,8 @@ GPU 메모리의 역사는 대역폭과의 전쟁이다.
 그러나 GDDR은 **핀 수 한계**가 있다. 대역폭을 높이려면 버스 폭을 넓혀야 하는데, PCB 배선이 물리적으로 한계에 도달한다. 이 문제를 해결한 것이 **HBM (High Bandwidth Memory)**이다.
 
 HBM은 DRAM 다이를 수직으로 적층(3D stacking)하고, **TSV (Through-Silicon Via)**로 연결한다. 한 스택의 버스 폭이 1024-bit (HBM1/2) 또는 2048-bit (HBM4)로, GDDR의 32배 이상이다.
+
+<HBMStackDiagram />
 
 ### 3.2 HBM 세대별 진화
 

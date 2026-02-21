@@ -12,6 +12,9 @@ import JSICallFlow from "@/components/blog/JSICallFlow";
 import TurboModuleComparison from "@/components/blog/TurboModuleComparison";
 import FabricPipeline from "@/components/blog/FabricPipeline";
 import LLMMemoryCalculator from "@/components/blog/LLMMemoryCalculator";
+import TransformerDecoderDiagram from "@/components/blog/TransformerDecoderDiagram";
+import AttentionComparisonDiagram from "@/components/blog/AttentionComparisonDiagram";
+import HBMStackDiagram from "@/components/blog/HBMStackDiagram";
 
 function langFromClassName(className?: string): string | undefined {
   if (!className) return undefined;
@@ -139,6 +142,9 @@ const mdxComponents = {
   TurboModuleComparison,
   FabricPipeline,
   LLMMemoryCalculator,
+  TransformerDecoderDiagram,
+  AttentionComparisonDiagram,
+  HBMStackDiagram,
   code({
     className,
     children,
