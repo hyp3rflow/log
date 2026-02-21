@@ -16,7 +16,7 @@ const COLORS = {
   output: "#60c080",
   text: "#ccc",
   sublabel: "#888",
-  arrow: "#999",
+  arrow: "#888",
   residual: "#666",
 };
 

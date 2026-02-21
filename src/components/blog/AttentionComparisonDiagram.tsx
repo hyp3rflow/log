@@ -11,7 +11,7 @@ const WRAPPER: React.CSSProperties = {
 const COLORS = {
   q: "#6eb5ff",
   kv: "#f0a050",
-  line: "#555",
+  line: "#888",
   text: "#ccc",
   bar100: "#f06060",
   bar25: "#f0a050",

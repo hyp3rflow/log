@@ -10,8 +10,8 @@ const WRAPPER: React.CSSProperties = {
 
 const COLORS = {
   token: "#6090e0",
-  arrow: "#999",
-  connection: "#f0a050",
+  arrow: "#888",
+  connection: "#888",
   label: "#ccc",
   sublabel: "#888",
 };

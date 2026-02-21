@@ -52,28 +52,28 @@ function RNNSection() {
 
           {/* ── x_t (bottom → cell) ── */}
           <line x1={cx} y1={180} x2={cx} y2={cy + bh / 2 + 2}
-            stroke={C.input} strokeWidth={1.5} markerEnd="url(#rnn-a)" />
+            stroke={C.arrow} strokeWidth={1.5} markerEnd="url(#rnn-a)" />
           <text x={cx + 14} y={174} fill={C.input} fontSize={12} fontFamily="system-ui, sans-serif">
             x_t
           </text>
 
           {/* ── y_t (cell → top) ── */}
           <line x1={cx} y1={cy - bh / 2 - 2} x2={cx} y2={24}
-            stroke={C.output} strokeWidth={1.5} markerEnd="url(#rnn-a)" />
+            stroke={C.arrow} strokeWidth={1.5} markerEnd="url(#rnn-a)" />
           <text x={cx + 14} y={32} fill={C.output} fontSize={12} fontFamily="system-ui, sans-serif">
             y_t
           </text>
 
           {/* ── h_{t-1} (left → cell) ── */}
           <line x1={80} y1={cy} x2={cx - bw / 2 - 2} y2={cy}
-            stroke={C.hidden} strokeWidth={1.5} markerEnd="url(#rnn-a)" />
+            stroke={C.arrow} strokeWidth={1.5} markerEnd="url(#rnn-a)" />
           <text x={60} y={cy - 8} textAnchor="middle" fill={C.hidden} fontSize={12} fontFamily="system-ui, sans-serif">
             h_(t−1)
           </text>
 
           {/* ── h_t (cell → right) ── */}
           <line x1={cx + bw / 2 + 2} y1={cy} x2={W - 80} y2={cy}
-            stroke={C.hidden} strokeWidth={1.5} markerEnd="url(#rnn-a)" />
+            stroke={C.arrow} strokeWidth={1.5} markerEnd="url(#rnn-a)" />
           <text x={W - 60} y={cy - 8} textAnchor="middle" fill={C.hidden} fontSize={12} fontFamily="system-ui, sans-serif">
             h_t
           </text>
@@ -81,7 +81,7 @@ function RNNSection() {
           {/* ── Recurrence (curved arrow h_t → h_{t-1}) ── */}
           <path
             d={`M${W - 90},${cy + 16} Q${W - 60},${cy + 60} ${cx},${cy + 60} Q${100},${cy + 60} ${90},${cy + 16}`}
-            fill="none" stroke={C.hidden} strokeWidth={1} strokeDasharray="5,3" opacity={0.4}
+            fill="none" stroke={C.arrow} strokeWidth={1} strokeDasharray="5,3" opacity={0.4}
           />
           <text x={cx} y={cy + 72} textAnchor="middle" fill={C.label} fontSize={9} fontFamily="system-ui, sans-serif">
             recurrence (순차 처리 — 병렬화 불가)
@@ -137,7 +137,7 @@ function LSTMSection() {
 
           {/* ── Cell State line (horizontal through top) ── */}
           <line x1={cellLeft - 40} y1={csY} x2={cellRight + 40} y2={csY}
-            stroke={C.cellState} strokeWidth={2.5} opacity={0.5} markerEnd="url(#lstm-a)" />
+            stroke={C.arrow} strokeWidth={2} opacity={0.5} markerEnd="url(#lstm-a)" />
           <text x={cellLeft - 52} y={csY + 5} textAnchor="end" fill={C.cellState} fontSize={11} fontFamily="system-ui, sans-serif">
             c_(t−1)
           </text>
@@ -165,21 +165,21 @@ function LSTMSection() {
 
           {/* ── h_{t-1} (left → cell) ── */}
           <line x1={cellLeft - 40} y1={gateY} x2={cellLeft - 2} y2={gateY}
-            stroke={C.hidden} strokeWidth={1.5} markerEnd="url(#lstm-a)" />
+            stroke={C.arrow} strokeWidth={1.5} markerEnd="url(#lstm-a)" />
           <text x={cellLeft - 52} y={gateY + 5} textAnchor="end" fill={C.hidden} fontSize={11} fontFamily="system-ui, sans-serif">
             h_(t−1)
           </text>
 
           {/* ── h_t (cell → right) ── */}
           <line x1={cellRight + 2} y1={gateY} x2={cellRight + 40} y2={gateY}
-            stroke={C.hidden} strokeWidth={1.5} markerEnd="url(#lstm-a)" />
+            stroke={C.arrow} strokeWidth={1.5} markerEnd="url(#lstm-a)" />
           <text x={cellRight + 52} y={gateY + 5} fill={C.hidden} fontSize={11} fontFamily="system-ui, sans-serif">
             h_t
           </text>
 
           {/* ── x_t (bottom → cell) ── */}
           <line x1={cx} y1={260} x2={cx} y2={topY + cellH + 2}
-            stroke={C.input} strokeWidth={1.5} markerEnd="url(#lstm-a)" />
+            stroke={C.arrow} strokeWidth={1.5} markerEnd="url(#lstm-a)" />
           <text x={cx + 14} y={258} fill={C.input} fontSize={12} fontFamily="system-ui, sans-serif">
             x_t
           </text>
