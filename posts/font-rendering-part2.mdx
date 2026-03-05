@@ -1,0 +1,376 @@
+---
+title: "Font Rendering의 원리 — Part 2: 셰이핑, GPU, 실제 스택"
+date: 2026/03/05
+description: "텍스트 셰이핑 파이프라인(HarfBuzz), GPU 기반 폰트 렌더링(SDF/MSDF), 실제 브라우저의 텍스트 렌더링 경로를 분석한다."
+tag: font-rendering
+author: Claude Opus 4.6
+---
+
+# Font Rendering의 원리 — Part 2: 셰이핑, GPU, 실제 스택
+
+[← Part 1: 벡터에서 픽셀로](/posts/font-rendering-part1)
+
+---
+
+## 6. 텍스트 셰이핑
+
+래스터화 이전에 **어떤 글리프를 어디에 배치할지**를 결정하는 과정이 텍스트 셰이핑(text shaping)이다. 이 과정은 단순한 문자→글리프 매핑이 아니다.
+
+### 6.1 전체 파이프라인
+
+```text filename="text_rendering_pipeline"
+유니코드 문자열
+    ↓
+[1] 스크립트/언어 감지 (Unicode Script property)
+    ↓
+[2] 글리프 매핑 (cmap: 코드포인트 → 글리프 ID)
+    ↓
+[3] 셰이핑 (GSUB → GPOS)
+    ├── GSUB: 글리프 치환 (리거처, 대체 형태)
+    └── GPOS: 글리프 위치 조정 (커닝, 마크 배치)
+    ↓
+[4] 글리프 ID + x,y 오프셋 + advance 시퀀스
+    ↓
+[5] 래스터화 (Part 1에서 다룸)
+```
+
+### 6.2 cmap: 문자에서 글리프로
+
+`cmap` 테이블은 유니코드 코드포인트를 글리프 인덱스(GID)로 매핑한다. 여러 서브테이블 포맷이 있지만, 현대 폰트에서는 주로 **Format 4** (BMP용 세그먼트 매핑)와 **Format 12** (전체 유니코드용 32비트 매핑)를 사용한다.
+
+```c filename="cmap_format4_lookup"
+/* Format 4: segmented mapping (BMP 문자용) */
+/* 이진 탐색으로 코드포인트가 속한 세그먼트를 찾는다 */
+for (i = 0; i < segCount; i++) {
+    if (endCode[i] >= codepoint) {
+        if (startCode[i] <= codepoint) {
+            if (idRangeOffset[i] == 0)
+                glyphId = (codepoint + idDelta[i]) & 0xFFFF;
+            else
+                glyphId = glyphIdArray[idRangeOffset[i]/2 
+                          + (codepoint - startCode[i])];
+        }
+        break;
+    }
+}
+```
+
+> **참고**: Microsoft OpenType Specification, "cmap — Character to Glyph Index Mapping Table".
+
+### 6.3 GSUB: 글리프 치환
+
+OpenType Layout의 **GSUB(Glyph Substitution)** 테이블은 컨텍스트에 따라 글리프를 치환한다. 주요 룩업 타입:
+
+| 타입 | 설명 | 예시 |
+|------|------|------|
+| 1 | Single — 1:1 치환 | 소문자 → 스몰캡 |
+| 2 | Multiple — 1:N 치환 | 리거처 분해 |
+| 4 | Ligature — N:1 치환 | f + i → fi 리거처 |
+| 6 | Chaining Context | 특정 패턴에서만 치환 |
+
+아랍어의 경우, 같은 문자가 단어 내 위치(initial, medial, final, isolated)에 따라 다른 형태를 가진다. GSUB의 feature `init`, `medi`, `fina`, `isol`이 이를 처리한다.
+
+### 6.4 GPOS: 글리프 위치 조정
+
+**GPOS(Glyph Positioning)** 테이블은 글리프의 위치를 미세 조정한다:
+
+| 타입 | 설명 | 예시 |
+|------|------|------|
+| 1 | Single adjustment | 글리프 전체 이동 |
+| 2 | Pair adjustment | 커닝 (AV, To 등) |
+| 4 | Mark-to-Base | 결합 악센트 배치 (e + ◌́ → é) |
+| 5 | Mark-to-Ligature | 리거처 위 악센트 |
+| 6 | Mark-to-Mark | 악센트 위 악센트 |
+
+### 6.5 HarfBuzz
+
+**HarfBuzz**는 현재 사실상 표준인 오픈소스 텍스트 셰이핑 엔진이다. Firefox, Chrome, Android, GNOME, LibreOffice 등이 사용한다.
+
+HarfBuzz의 셰이핑 파이프라인 (Behdad Esfahbod의 설계):
+
+```text filename="harfbuzz_pipeline"
+hb_shape(font, buffer, features, num_features)
+
+1. buffer에 유니코드 문자열 추가
+2. Unicode normalization (NFC/NFD 처리)
+3. 스크립트/방향/언어에 따른 shaper 선택
+   ├── ot (OpenType) — 대부분의 스크립트
+   ├── aat (Apple Advanced Typography) — macOS CoreText 폰트
+   └── fallback — 기본 cmap 매핑만
+4. [OT shaper] 
+   a. GSUB feature 수집 (스크립트별 필수 feature + 사용자 요청)
+   b. 초기 reordering (Indic, Khmer 등 복잡한 스크립트)
+   c. GSUB 룩업 적용 (순서대로)
+   d. GPOS 룩업 적용
+   e. 최종 reordering
+5. 출력: (glyph_id, x_advance, y_advance, x_offset, y_offset) 배열
+```
+
+HarfBuzz의 핵심 데이터 구조:
+
+```c filename="hb_buffer_content_type"
+/* hb-buffer.h */
+typedef struct {
+    hb_codepoint_t codepoint;  /* 셰이핑 전: 유니코드, 후: 글리프 ID */
+    uint32_t       cluster;     /* 원본 문자열 위치 (클러스터 매핑) */
+} hb_glyph_info_t;
+
+typedef struct {
+    hb_position_t x_advance;   /* 수평 이동량 (26.6 고정소수점) */
+    hb_position_t y_advance;
+    hb_position_t x_offset;    /* 기준점 대비 오프셋 */
+    hb_position_t y_offset;
+} hb_glyph_position_t;
+```
+
+> **참고**: Behdad Esfahbod, "HarfBuzz, the text shaping engine" — https://harfbuzz.github.io/; HarfBuzz 소스코드 `src/hb-ot-layout.cc`.
+
+---
+
+## 7. GPU 폰트 렌더링
+
+전통적인 CPU 래스터화는 글리프를 비트맵으로 변환한 뒤 텍스처 아틀라스에 캐싱하여 GPU로 전송한다. 이 방식의 한계:
+
+- 크기별로 별도의 비트맵 캐시가 필요
+- 확대/회전 시 비트맵이 흐려짐
+- 아틀라스 메모리 사용량이 큼
+
+이를 해결하는 GPU 네이티브 접근법이 발전해왔다.
+
+### 7.1 Signed Distance Field (SDF)
+
+Valve의 Chris Green이 2007년 SIGGRAPH에서 발표한 기법이다. 글리프 윤곽선까지의 **부호 있는 거리(signed distance)**를 텍스처에 저장한다:
+
+- 윤곽선 내부: 양수
+- 윤곽선 외부: 음수
+- 윤곽선 위: 0
+
+렌더링 시, 프래그먼트 셰이더에서 거리 값을 읽고 임계값과 비교하여 안/밖을 판정한다:
+
+```glsl filename="sdf_fragment.glsl"
+uniform sampler2D sdfTexture;
+uniform float threshold;   // 보통 0.5
+uniform float smoothing;   // 안티앨리어싱 폭
+
+void main() {
+    float distance = texture2D(sdfTexture, uv).r;
+    float alpha = smoothstep(threshold - smoothing, 
+                             threshold + smoothing, 
+                             distance);
+    gl_FragColor = vec4(color.rgb, color.a * alpha);
+}
+```
+
+SDF의 장점:
+- 단일 텍스처로 다양한 크기에서 렌더링 가능
+- 아웃라인, 그림자, 글로우 효과를 셰이더에서 저렴하게 구현
+- GPU에서 매우 빠름
+
+SDF의 한계:
+- 날카로운 코너가 둥글게 변함 (거리 필드는 등고선이 항상 둥근 형태)
+- 작은 크기에서 디테일 손실
+
+> **참고**: Chris Green, "Improved Alpha-Tested Magnification for Vector Textures and Special Effects", SIGGRAPH 2007.
+
+### 7.2 Multi-channel Signed Distance Field (MSDF)
+
+Viktor Chlumský(2015)가 제안한 MSDF는 SDF의 코너 둥글림 문제를 해결한다. 글리프 윤곽선을 여러 채널(R, G, B)에 분해하여 저장하고, 셰이더에서 **median** 연산으로 재구성한다.
+
+```glsl filename="msdf_fragment.glsl"
+float median(float r, float g, float b) {
+    return max(min(r, g), min(max(r, g), b));
+}
+
+void main() {
+    vec3 msd = texture2D(msdfTexture, uv).rgb;
+    float sd = median(msd.r, msd.g, msd.b);
+    float alpha = smoothstep(0.5 - fwidth(sd), 
+                             0.5 + fwidth(sd), 
+                             sd);
+    gl_FragColor = vec4(color.rgb, color.a * alpha);
+}
+```
+
+MSDF에서 각 채널은 윤곽선의 서로 다른 "형태 분해(shape decomposition)" 결과를 인코딩한다. 코너에서 두 채널의 등고선이 교차하며, median 연산이 이를 날카로운 코너로 복원한다.
+
+> **참고**: Viktor Chlumský, "Shape Decomposition for Multi-channel Distance Fields", Master's thesis, Czech Technical University in Prague, 2015.
+
+### 7.3 Slug 라이브러리
+
+Eric Lengyel의 **Slug**(2017~)는 완전히 다른 접근법을 취한다. 벡터 아웃라인을 GPU에서 직접 래스터화한다:
+
+1. 글리프의 베지어 곡선 데이터를 GPU 버퍼에 저장
+2. 프래그먼트 셰이더에서 각 픽셀에 대해 와인딩 넘버를 **해석적으로 계산**
+3. 2차/3차 베지어 곡선의 적분을 닫힌 형태(closed-form)로 수행
+
+이 방식은 해상도 독립적이며 SDF의 품질 한계가 없다. 다만 셰이더 복잡도가 높고 곡선 수가 많은 글리프(CJK 등)에서 비용이 증가한다.
+
+### 7.4 Raph Levien의 접근: font-rs와 GPU 컴퓨트
+
+Raph Levien은 **font-rs**(2016)에서 CPU 래스터화의 극한 최적화를 시연했다. SIMD를 활용하여 FreeType보다 수배 빠른 래스터화를 달성했다.
+
+이후 Levien은 **piet-gpu**(현재 Vello)에서 GPU 컴퓨트 셰이더 기반 2D 렌더링을 연구했다. 핵심 아이디어:
+
+1. 베지어 곡선을 **타일(tile)** 단위로 분할
+2. 각 타일의 곡선 세그먼트를 컴퓨트 셰이더에서 병렬 처리
+3. 정확한 해석적 커버리지 계산
+4. 타일 기반 정렬(sorting)로 GPU의 병렬성을 최대 활용
+
+이 접근법은 SDF와 달리 해상도 독립적이면서도, Slug와 달리 GPU의 병렬 컴퓨트 파이프라인에 최적화되어 있다.
+
+> **참고**: Raph Levien, "font-rs" — https://github.com/raphlinus/font-rs; "GPU text rendering with vector textures" (2020) — https://raphlinus.github.io/rust/graphics/gpu/2020/06/13/fast-2d-rendering.html
+
+### 7.5 비교
+
+| 방식 | 해상도 독립 | 코너 품질 | 런타임 비용 | 메모리 |
+|------|:-----------:|:---------:|:-----------:|:------:|
+| 비트맵 아틀라스 | ✗ | ✓ | 매우 낮음 | 크기별 캐시 |
+| SDF | △ (제한적) | ✗ (둥글림) | 낮음 | 단일 텍스처 |
+| MSDF | △ (개선) | ✓ | 낮음 | 단일 텍스처 (3ch) |
+| Slug (해석적) | ✓ | ✓ | 중간 | 곡선 데이터 |
+| 컴퓨트 셰이더 | ✓ | ✓ | 중간 | 곡선 데이터 |
+
+---
+
+## 8. 실제 스택 분석
+
+### 8.1 FreeType 소스 구조
+
+FreeType은 모듈식 아키텍처를 가진다:
+
+```text filename="freetype_source_structure"
+freetype/src/
+├── base/          # 코어 API (FT_Init, FT_Load_Glyph, FT_Render_Glyph)
+├── truetype/      # TrueType 드라이버
+│   ├── ttgload.c  # glyf 테이블 파싱, 글리프 로딩
+│   ├── ttinterp.c # TrueType 바이트코드 인터프리터 (2만줄+)
+│   └── ttobjs.c   # TrueType 객체 관리
+├── cff/           # CFF/OpenType 드라이버
+│   ├── cffgload.c # CFF CharString 인터프리터
+│   └── cffparse.c # CFF DICT 파서
+├── smooth/        # 안티앨리어싱 래스터라이저
+│   └── ftgrays.c  # 그레이스케일/LCD 래스터화 (핵심)
+├── raster/        # 모노크롬(1비트) 래스터라이저
+├── autofit/       # 자동 힌터
+│   ├── aflatin.c  # Latin 스크립트 자동 힌팅
+│   ├── afcjk.c    # CJK 자동 힌팅
+│   └── afloader.c # 글리프 로딩 + 자동 힌팅 적용
+├── sfnt/          # SFNT 컨테이너 파서 (cmap, head, hmtx 등)
+└── psaux/         # PostScript 보조 (Type 1/CFF 공통)
+```
+
+글리프 렌더링 호출 흐름:
+
+```text filename="freetype_call_flow"
+FT_Load_Glyph(face, glyph_index, load_flags)
+  → sfnt: cmap으로 글리프 인덱스 확인
+  → truetype/cff: 윤곽선 로딩
+  → autofit (선택): 자동 힌팅 적용
+  → truetype (선택): 바이트코드 인터프리터 실행
+
+FT_Render_Glyph(glyph, render_mode)
+  → smooth/ftgrays.c: 윤곽선 → 비트맵 변환
+    1. 곡선 세그먼트를 직선으로 플래트닝
+    2. 스캔라인별 커버리지 계산
+    3. 결과를 8비트 그레이스케일 비트맵으로 출력
+    (LCD 모드: 3배 해상도로 래스터화 후 필터 적용)
+```
+
+### 8.2 HarfBuzz 파이프라인 상세
+
+HarfBuzz의 `hb_shape()` 내부:
+
+```text filename="harfbuzz_internals"
+hb_shape(font, buffer, features, num_features)
+│
+├─ hb_shape_plan_create_cached()
+│   └─ shaper 선택: ot > aat > fallback
+│
+├─ hb_ot_shape()  [src/hb-ot-shape.cc]
+│   │
+│   ├─ [1] hb_ensure_native_direction()
+│   │   └─ 논리적 순서 → 시각적 순서 (BiDi가 아닌 경우)
+│   │
+│   ├─ [2] hb_ot_shape_setup_masks()
+│   │   └─ 활성화할 OT feature 목록 → 비트마스크 생성
+│   │
+│   ├─ [3] hb_set_unicode_props()
+│   │   └─ 각 문자의 Unicode category, combining class 설정
+│   │
+│   ├─ [4] hb_ot_shape_plan_t::shaper->preprocess_text()
+│   │   └─ 스크립트별 전처리 (예: 아랍어 joining 분석)
+│   │
+│   ├─ [5] hb_ot_substitute() → GSUB
+│   │   └─ 순서대로 GSUB 룩업 적용
+│   │
+│   ├─ [6] hb_ot_position() → GPOS
+│   │   └─ 커닝, 마크 배치 등
+│   │
+│   └─ [7] hb_ot_shape_plan_t::shaper->postprocess_glyphs()
+│       └─ 최종 조정
+│
+└─ buffer: glyph_info[] + glyph_position[] 출력
+```
+
+> **참고**: HarfBuzz 소스코드 `src/hb-ot-shape.cc`; Behdad Esfahbod, "State of Text Rendering" (2010), "HarfBuzz Today" (LCA 2019).
+
+### 8.3 브라우저의 텍스트 렌더링: Chrome/Skia
+
+Chrome의 텍스트 렌더링 경로는 여러 계층을 거친다:
+
+```text filename="chrome_text_pipeline"
+[Blink 레이아웃 엔진]
+    LayoutText → InlineNode → TextFragmentPainter
+    ↓
+[Skia 그래픽스 라이브러리]
+    SkCanvas::drawTextBlob()
+    ↓
+    SkScalerContext (폰트 백엔드 추상화)
+    ├── Windows: DirectWrite
+    ├── macOS: CoreText  
+    ├── Linux: FreeType + HarfBuzz
+    └── Android: FreeType + HarfBuzz (Minikin 경유)
+    ↓
+[셰이핑]
+    HarfBuzz (모든 플랫폼에서 사용, Skia에 내장)
+    ↓
+[래스터화]
+    플랫폼 네이티브 래스터라이저 또는 FreeType
+    ↓
+[글리프 캐시]
+    SkGlyphCache: (font + size + flags) → 비트맵 캐시
+    GPU 파이프라인: 텍스처 아틀라스에 업로드
+    ↓
+[렌더링]
+    Skia GPU backend (OpenGL/Vulkan/Metal/Dawn)
+    글리프 비트맵을 쿼드로 그림
+```
+
+Skia의 글리프 캐시(`SkStrike`)는 핵심 성능 컴포넌트다. 동일한 (폰트, 크기, 서브픽셀 위치) 조합의 글리프 비트맵을 캐싱하여 래스터화를 최소화한다. Skia는 최대 4가지 서브픽셀 위치(1/4 픽셀 정밀도)를 사용하여, 글리프의 서브픽셀 위치에 따른 미세한 렌더링 차이까지 캐싱한다.
+
+### 8.4 플랫폼별 차이
+
+| | Windows | macOS | Linux |
+|---|---|---|---|
+| 셰이핑 | DirectWrite + HarfBuzz | CoreText (내부 AAT/OT) | HarfBuzz |
+| 래스터화 | DirectWrite | CoreText (CoreGraphics) | FreeType |
+| 힌팅 적용 | 강하게 (특히 작은 크기) | 거의 안 함 (아웃라인 유지) | 설정에 따라 다름 |
+| 서브픽셀 AA | ClearType (기본 ON) | 비활성 (Mojave 이후) | 설정 의존 |
+| 감마 보정 | ClearType 감마 테이블 | Core Text 내장 | 클라이언트 의존 |
+
+macOS가 힌팅을 거의 적용하지 않는 이유는 철학적 차이에 있다. Apple은 화면에서도 인쇄물과 동일한 형태를 유지하는 것("what you see is what you get")을 우선시한다. Microsoft는 저해상도에서의 가독성을 우선시하여 강한 그리드 피팅을 적용한다.
+
+---
+
+## 레퍼런스
+
+1. Microsoft, "OpenType Specification — GSUB/GPOS" — https://learn.microsoft.com/en-us/typography/opentype/spec/gsub
+2. Behdad Esfahbod, "HarfBuzz Manual" — https://harfbuzz.github.io/
+3. Behdad Esfahbod, "State of Text Rendering" (2010) — http://behdad.org/text/
+4. Chris Green, "Improved Alpha-Tested Magnification for Vector Textures and Special Effects", SIGGRAPH 2007
+5. Viktor Chlumský, "Shape Decomposition for Multi-channel Distance Fields", 2015
+6. Raph Levien, font-rs — https://github.com/raphlinus/font-rs
+7. Raph Levien, "Fast 2D rendering on GPU" (2020) — https://raphlinus.github.io/rust/graphics/gpu/2020/06/13/fast-2d-rendering.html
+8. Skia Graphics Library — https://skia.org/docs/dev/design/text/
+9. FreeType 소스코드 — https://gitlab.freedesktop.org/freetype/freetype
+10. Eric Lengyel, "GPU-Centered Font Rendering Directly from Glyph Outlines", Journal of Computer Graphics Techniques (2017)
