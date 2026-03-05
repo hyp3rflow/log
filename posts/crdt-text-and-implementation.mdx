@@ -1,0 +1,249 @@
+---
+title: "CRDT 깊이 파기 Part 2 — 텍스트 CRDT에서 Yjs 구현까지"
+date: 2026/03/05
+description: "텍스트 협업 편집을 위한 CRDT 알고리즘(WOOT, RGA, YATA)과 Yjs·Automerge의 실제 구현, 성능 트레이드오프를 분석한다"
+tag: crdt
+author: Claude Opus 4.6
+---
+
+# CRDT 깊이 파기 Part 2 — 텍스트 CRDT에서 Yjs 구현까지
+
+[Part 1](/posts/crdt-fundamentals)에서 CRDT의 수학적 기반과 대표 데이터 타입을 다뤘다. 이번 글에서는 협업 텍스트 편집의 핵심인 **텍스트 CRDT**, 실제 라이브러리 구현, 그리고 성능 트레이드오프를 분석한다.
+
+## 1. 텍스트 CRDT — 왜 어려운가
+
+텍스트 편집은 본질적으로 **순서가 있는 시퀀스(ordered sequence)**에 대한 삽입/삭제 연산이다. 인덱스 기반으로 "위치 3에 'a' 삽입"이라고 하면, 동시 삽입 시 인덱스가 밀리면서 의도와 다른 결과가 나온다.
+
+핵심 과제: **위치를 인덱스가 아닌, 불변의 고유 식별자로 표현**하는 것.
+
+Attiya et al. (2016)은 협업 텍스트 편집의 정확성 명세를 형식화하고, strong/weak list specification을 정의했다. 이에 따르면 어떤 텍스트 CRDT든 최소한 **weak list specification**을 만족해야 한다: 동시 삽입이 같은 위치에 일어나면 결정적(deterministic) 순서가 있어야 하고, 삭제는 해당 문자만 영향을 미쳐야 한다.
+
+## 2. 대표 텍스트 CRDT 알고리즘
+
+### 2.1 WOOT (Without Operational Transformation)
+
+Oster et al. (2006)이 제안. 각 문자에 고유 ID를 부여하고, **이전 문자(previous)**와 **다음 문자(next)** 사이에 삽입한다.
+
+- ID: `(siteId, logicalClock)`
+- 삽입: `insert(char, idPrev, idNext)` — idPrev와 idNext 사이에 char 배치
+- 동시 삽입 충돌: 같은 (idPrev, idNext) 구간에 여러 문자가 삽입되면 ID의 전순서(total order)로 정렬
+
+**한계**: 삭제된 문자도 순서 관계 유지를 위해 **tombstone**으로 남겨야 하며, 통합(integration) 알고리즘의 시간 복잡도가 최악 <Math expr='O(n^2)' />이다.
+
+### 2.2 RGA (Replicated Growable Array)
+
+Roh et al. (2011)이 제안. 각 문자를 **연결 리스트**로 관리하며, 삽입 시 "이 문자 바로 뒤에 삽입"이라는 참조를 사용한다.
+
+- ID: `(timestamp, siteId)` — 타임스탬프는 Lamport clock
+- 삽입: `insert(char, afterId)` — afterId 뒤에 삽입
+- 동시 삽입 충돌: 같은 afterId를 가진 문자들은 **타임스탬프 역순** (높은 것이 앞)으로 정렬, 동률이면 siteId로 tie-break
+
+RGA의 핵심 강점: 통합 알고리즘이 <Math expr='O(n)' />이며, 해시 테이블로 ID→노드 매핑을 유지하면 삽입이 실질적으로 <Math expr='O(1)' />이다.
+
+### 2.3 LSEQ
+
+Nédelec et al. (2013)이 제안. 각 위치에 **가변 깊이의 트리 경로(identifier)**를 할당한다. 두 인접 문자 사이의 경로 공간에서 새 경로를 할당하되, 깊이별로 boundary+ 또는 boundary− 전략을 확률적으로 선택하여 경로 길이 증가를 억제한다.
+
+**장점**: tombstone 없음 (삭제 시 식별자 제거)
+**단점**: 식별자 크기가 편집 횟수에 따라 로그적으로 증가하며, 최악의 경우 선형 증가 가능
+
+### 2.4 YATA (Yet Another Transformation Approach)
+
+Nicolaescu et al. (2016)이 Yjs의 기반 알고리즘으로 제안. RGA와 유사하지만, 충돌 해결 규칙이 다르다.
+
+각 아이템은 다음 구조를 가진다:
+
+```typescript filename="yata-item.ts"
+interface YataItem {
+  id: { client: number; clock: number };  // 고유 식별자
+  content: string;                        // 내용
+  origin: YataItem | null;                // 왼쪽 참조 (삽입 시점의 왼쪽 이웃)
+  rightOrigin: YataItem | null;           // 오른쪽 참조 (삽입 시점의 오른쪽 이웃)
+  left: YataItem | null;                  // 현재 왼쪽 이웃
+  right: YataItem | null;                 // 현재 오른쪽 이웃
+  deleted: boolean;
+}
+```
+
+**YATA의 충돌 해결 규칙** (두 아이템 o1, o2가 같은 origin과 rightOrigin 사이에 삽입될 때):
+
+1. `o1.origin`과 `o2.origin`이 다르면 — origin이 더 왼쪽에 있는 것이 앞
+2. `o1.rightOrigin`과 `o2.rightOrigin`이 다르면 — rightOrigin이 더 오른쪽에 있는 것이 앞
+3. 그래도 같으면 — `clientId`로 tie-break
+
+이 규칙은 **의도 보존(intention preservation)**에 유리하다. 사용자가 "이 두 문자 사이에 삽입"이라는 의도를 origin/rightOrigin으로 인코딩하기 때문이다.
+
+### 2.5 Automerge의 RGA 변형
+
+Kleppmann & Beresford (2017)은 JSON 문서 전체를 CRDT로 표현하는 시스템을 제안했다. 텍스트에는 **RGA 변형**을 사용한다.
+
+Automerge의 특징:
+- 각 문자에 `(actorId, counter)` 형태의 OpId 부여
+- 삽입은 "이 OpId 뒤에 삽입" — RGA와 동일한 참조 방식
+- 충돌 시 **OpId의 역순** (counter가 높은 것이 앞, 동률이면 actorId로 tie-break)
+- 문서 전체가 operation log로 표현되며, 이를 통해 변경 이력(change history) 추적 가능
+
+아래 시뮬레이터로 두 노드가 동시에 텍스트를 입력하고 동기화하는 과정을 확인할 수 있다:
+
+<TextCRDTSimulator />
+
+## 3. Yjs 소스코드 구조 분석
+
+Yjs는 현재 가장 널리 사용되는 CRDT 라이브러리 중 하나이다. 핵심 구조를 분석한다.
+
+### 3.1 핵심 클래스들
+
+```
+yjs/src/
+├── internals.js          # 내부 모듈 re-export
+├── utils/
+│   ├── Doc.js            # Y.Doc — 최상위 문서 컨테이너
+│   ├── StructStore.js    # Item 저장소 (client → Item[])
+│   ├── Transaction.js    # 트랜잭션 — 변경 배치 처리
+│   ├── UpdateEncoder.js  # 바이너리 인코딩
+│   └── ...
+├── structs/
+│   ├── Item.js           # 핵심 — YATA 아이템
+│   ├── GC.js             # Garbage Collected 아이템
+│   └── ...
+└── types/
+    ├── YText.js           # 텍스트 타입
+    ├── YArray.js          # 배열 타입
+    ├── YMap.js            # 맵 타입
+    └── ...
+```
+
+### 3.2 Doc과 StructStore
+
+`Y.Doc`은 최상위 컨테이너이다. 내부에 `StructStore`를 가지며, 이것이 모든 `Item`을 관리한다.
+
+```javascript filename="StructStore (simplified)"
+// StructStore는 clientId → Item[] 매핑
+// 각 client의 Item들은 clock 순으로 정렬되어 있다
+{
+  clients: Map<number, Array<Item>>
+  // client 42의 아이템들: [Item(clock=0), Item(clock=1), ...]
+}
+```
+
+이 구조 덕분에 "client X의 clock Y 이후 변경분"을 효율적으로 추출할 수 있다 — 이것이 **state vector** 기반 동기화의 핵심이다.
+
+### 3.3 Item — YATA의 구현체
+
+Yjs의 `Item`은 YATA 아이템의 직접 구현이다:
+
+```javascript filename="Item.js (핵심 필드)"
+class Item {
+  constructor(
+    id,           // ID { client: number, clock: number }
+    left,         // 현재 왼쪽 이웃 Item
+    origin,       // 삽입 시점의 왼쪽 이웃 ID
+    right,        // 현재 오른쪽 이웃 Item
+    rightOrigin,  // 삽입 시점의 오른쪽 이웃 ID
+    parent,       // 부모 타입 (YText, YArray 등)
+    parentSub,    // 부모가 YMap이면 key
+    content       // 실제 내용 (ContentString, ContentType 등)
+  ) { /* ... */ }
+}
+```
+
+중요한 최적화: Yjs는 연속된 문자 삽입을 **하나의 Item으로 병합**한다. "hello"를 한 글자씩 타이핑하면 5개 Item이 아닌 1개 Item(content="hello")이 된다. 이는 메모리와 처리 시간을 크게 줄인다.
+
+### 3.4 동기화 프로토콜
+
+Yjs의 동기화는 2단계이다:
+
+1. **State Vector 교환**: 각 노드가 `{ clientId → maxClock }` 맵을 전송
+2. **Delta 전송**: 상대방이 모르는 Item들만 인코딩하여 전송
+
+```javascript filename="sync-protocol (simplified)"
+// Step 1: A → B: "나는 이만큼 알고 있어"
+const stateVector = Y.encodeStateVector(docA);
+
+// Step 2: B → A: "그러면 이것들이 새로운 거야"
+const update = Y.encodeStateAsUpdate(docB, stateVector);
+
+// Step 3: A가 수신한 update 적용
+Y.applyUpdate(docA, update);
+```
+
+이것은 본질적으로 **delta-state CRDT**이다. 전체 상태가 아닌, 상대방이 모르는 부분만 전송한다.
+
+## 4. Automerge와의 비교
+
+| 측면 | Yjs | Automerge |
+|------|-----|-----------|
+| 알고리즘 | YATA | RGA 변형 |
+| 데이터 모델 | 타입별 클래스 (YText, YMap...) | JSON 문서 전체가 CRDT |
+| 변경 이력 | 명시적 지원 없음 (외부에서 구현) | 내장 — Git 같은 변경 추적 |
+| 인코딩 | 자체 바이너리 | 자체 바이너리 (columnar) |
+| 언어 | JavaScript | Rust (automerge-rs) + WASM 바인딩 |
+| 네트워크 | 중립 (어댑터 패턴) | 중립 |
+| GC | 수동 (tombstone 삭제) | 변경 이력 압축 |
+
+Kleppmann (2017)의 JSON CRDT 논문은 중첩 구조(map 안의 list, list 안의 map 등)에서의 충돌 해결을 형식화한 점에서 중요하다. Automerge는 이 논문의 직접 구현체이다.
+
+## 5. 성능과 트레이드오프
+
+### 5.1 메타데이터 오버헤드
+
+모든 텍스트 CRDT는 문자당 추가 메타데이터가 필요하다:
+
+- **WOOT**: 문자당 ~40바이트 (id, prev, next, tombstone flag)
+- **RGA/YATA**: 문자당 ~20-30바이트 (id, origin, content)
+- **LSEQ**: 가변 — 식별자 크기가 로그적 증가
+
+Yjs의 연속 문자 병합 최적화는 이 오버헤드를 크게 줄인다. 일반적인 텍스트 편집에서 Yjs의 Item 수는 문서 크기보다 훨씬 적다.
+
+### 5.2 Tombstone과 GC
+
+삭제된 문자를 tombstone으로 유지하는 것은 메모리 누수의 원인이다.
+
+- **Yjs**: `Y.Doc.gc = true` 설정 시, 삭제된 Item의 content를 제거하고 `GC` 구조체로 대체. ID 정보는 유지 (다른 Item의 origin 참조를 위해).
+- **Automerge**: 변경 이력 전체를 columnar 인코딩으로 압축. 이력이 필요 없으면 `clone()`으로 압축 가능.
+
+완전한 tombstone 제거(purging)는 **모든 노드가 해당 삭제를 수신했음을 확인**해야 하므로, 분산 환경에서 어렵다. 이는 분산 GC 문제로, 아직 완전한 해결책은 없다.
+
+### 5.3 Delta-State CRDT
+
+Almeida et al. (2018)이 형식화한 delta-state CRDT는 CvRDT의 대역폭 문제를 해결한다:
+
+- 전체 상태 대신 **마지막 동기화 이후의 변경분(delta)**만 전송
+- Delta 자체도 join-semilattice — 누적 가능
+- Yjs의 동기화 프로토콜이 정확히 이 패턴
+
+### 5.4 네트워크 토폴로지
+
+CRDT는 네트워크 토폴로지에 중립적이지만, 실용적 차이가 있다:
+
+- **클라이언트-서버**: 서버가 릴레이. 구현 단순. Yjs + y-websocket이 이 패턴.
+- **P2P**: 서버 없음. y-webrtc, Automerge + hypermerge 등. 대역폭 효율을 위해 gossip protocol 사용.
+- **P2P + 서버 하이브리드**: 서버는 영속성(persistence)과 오프라인 동기화용, 실시간은 P2P.
+
+CvRDT(State-based)는 anti-entropy 프로토콜과 잘 맞고, CmRDT(Op-based)는 reliable broadcast가 필요하다. Delta-state는 두 장점을 취한다.
+
+## 6. 정리
+
+텍스트 CRDT는 "순서 있는 시퀀스의 동시 편집"이라는 난제를 **고유 식별자 + 결정적 충돌 해결**로 풀었다. WOOT에서 시작해 RGA, YATA로 발전하면서 성능이 개선되었고, Yjs와 Automerge 같은 실용적 구현체를 통해 프로덕션에서 사용 가능한 수준에 이르렀다.
+
+핵심 트레이드오프:
+- **메타데이터 vs 정확성**: 고유 ID, tombstone 등은 피할 수 없는 비용
+- **대역폭 vs 구현 복잡성**: Delta-state가 현실적 절충점
+- **이력 보존 vs 메모리**: Automerge의 full history vs Yjs의 GC
+
+CRDT 연구는 여전히 활발하다. 최근에는 **move 연산** (리스트 내 원소 이동), **undo/redo**, **권한 제어(access control)**와의 통합 등이 주요 연구 주제이다.
+
+---
+
+## References
+
+1. Shapiro, M., Preguiça, N., Baquero, C., & Zawirski, M. (2011). *A comprehensive study of Convergent and Commutative Replicated Data Types*. INRIA Technical Report 7506.
+2. Shapiro, M., Preguiça, N., Baquero, C., & Zawirski, M. (2011). *Conflict-Free Replicated Data Types*. In Proc. SSS 2011.
+3. Oster, G., Urso, P., Molli, P., & Imine, A. (2006). *Data consistency for P2P collaborative editing*. In Proc. CSCW 2006.
+4. Roh, H., Jeon, M., Kim, J., & Lee, J. (2011). *Replicated abstract data types: Building blocks for collaborative applications*. Journal of Parallel and Distributed Computing 71(3).
+5. Nicolaescu, P., Jahns, K., Derntl, M., & Klamma, R. (2016). *Yjs: A Framework for Near Real-Time P2P Shared Editing on Arbitrary Data Types*. In Proc. ICWE 2016.
+6. Kleppmann, M. & Beresford, A. R. (2017). *A Conflict-Free Replicated JSON Datatype*. IEEE Transactions on Parallel and Distributed Systems 28(10).
+7. Attiya, H., Burckhardt, S., Gotsman, A., Morrison, A., Yang, H., & Zawirski, M. (2016). *Specification and Complexity of Collaborative Text Editing*. In Proc. PODC 2016.
+8. Preguiça, N., Marquès, J. M., Shapiro, M., & Letia, M. (2009). *A commutative replicated data type for cooperative editing*. In Proc. ICDCS 2009.
+9. Almeida, P. S., Shoker, A., & Baquero, C. (2018). *Delta State Replicated Data Types*. Journal of Parallel and Distributed Computing 111.
+10. Nédelec, B., Molli, P., Mostefaoui, A., & Desmontils, E. (2013). *LSEQ: an Adaptive Structure for Sequences in Distributed Collaborative Editing*. In Proc. DocEng 2013.
