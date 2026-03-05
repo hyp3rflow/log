@@ -1,0 +1,294 @@
+---
+title: "CRDT 깊이 파기 Part 1 — 수학적 기반에서 대표 데이터 타입까지"
+date: 2026/03/05
+description: "CRDT가 필요한 이유, 반격자 이론, State-based vs Operation-based 접근, 그리고 G-Counter부터 OR-Set까지 대표 타입들을 정리한다"
+tag: crdt
+author: Claude Opus 4.6
+---
+
+# CRDT 깊이 파기 Part 1 — 수학적 기반에서 대표 데이터 타입까지
+
+## 1. 문제 정의: 왜 CRDT가 필요한가
+
+분산 시스템에서 여러 노드가 같은 데이터를 복제(replicate)하면 **동시 수정(concurrent update)** 문제가 발생한다. 두 노드가 동시에 같은 문서를 편집하면, 어느 쪽이 "맞는" 상태인가?
+
+### 1.1 CAP Theorem과의 관계
+
+Brewer의 CAP Theorem에 따르면, 네트워크 파티션(P)이 발생했을 때 **일관성(C)**과 **가용성(A)** 중 하나를 포기해야 한다.
+
+- **CP 시스템** (e.g., ZooKeeper): 파티션 발생 시 일부 노드가 요청을 거부. 강한 일관성 보장.
+- **AP 시스템** (e.g., Dynamo, CouchDB): 파티션 중에도 모든 노드가 읽기/쓰기 가능. 대신 일관성을 **eventual consistency**로 완화.
+
+CRDT는 AP 시스템에 위치한다. 파티션 중에도 각 노드가 독립적으로 업데이트를 수행하고, 나중에 동기화하면 **자동으로 수렴**한다. 중앙 조정자(coordinator)나 합의 프로토콜(consensus) 없이도 eventual consistency를 수학적으로 보장하는 것이 CRDT의 핵심이다.
+
+### 1.2 기존 접근법의 한계
+
+**OT (Operational Transformation)**는 Google Docs가 사용하는 방식으로, 중앙 서버가 동시 연산의 순서를 결정하고 변환한다. 이는 잘 작동하지만:
+
+- 중앙 서버 의존성 — 서버가 단일 장애점(SPOF)
+- 변환 함수의 정확성 증명이 어려움 — TP1/TP2 조건 검증의 복잡성
+- P2P 환경에서 구현이 극히 어려움
+
+CRDT는 이러한 한계를 **수학적 구조**로 해결한다.
+
+## 2. 수학적 기반
+
+CRDT의 정확성은 **반격자(semilattice)** 이론에 기반한다. Shapiro et al. (2011)의 정의를 따라간다.
+
+### 2.1 Join-Semilattice
+
+집합 <Math expr='S' />와 이항 연산 <Math expr='sqcup' /> (join)이 다음 세 조건을 만족하면 <Math expr='(S, sqcup)' />는 **join-semilattice**이다:
+
+<Math display expr='
+&"교환법칙 (Commutativity):" quad x sqcup y = y sqcup x \
+&"결합법칙 (Associativity):" quad (x sqcup y) sqcup z = x sqcup (y sqcup z) \
+&"멱등법칙 (Idempotency):" quad x sqcup x = x
+' />
+
+이 세 성질이 왜 중요한가:
+
+- **교환법칙**: 메시지 수신 순서와 무관하게 같은 결과
+- **결합법칙**: 여러 업데이트를 어떤 순서로 묶어도 같은 결과
+- **멱등법칙**: 같은 메시지를 중복 수신해도 안전
+
+### 2.2 Partial Order와 Monotonicity
+
+Semilattice는 자연스러운 **부분 순서(partial order)** <Math expr='lt.eq' />를 유도한다:
+
+<Math display expr='x lt.eq y quad <==> quad x sqcup y = y' />
+
+CRDT의 상태 변화는 이 부분 순서에 대해 **단조 증가(monotonically non-decreasing)**해야 한다:
+
+<Math display expr='s_1 lt.eq f(s_1) quad "for every update" f' />
+
+상태가 절대 "후퇴"하지 않으므로, 모든 노드가 같은 업데이트 집합을 수신하면 **같은 최소 상계(least upper bound, LUB)**에 도달한다. 이것이 eventual consistency의 수학적 보장이다.
+
+### 2.3 Convergence Theorem
+
+Shapiro et al. (2011)의 핵심 정리:
+
+> 모든 올바른 replica가 동일한 업데이트 집합을 전달받으면, 모든 replica는 동일한 상태로 수렴한다.
+
+증명의 핵심은 간단하다. join이 교환적이고 결합적이므로, 업데이트를 적용하는 순서와 무관하게 최종 상태는 모든 상태의 LUB와 같다:
+
+<Math display expr='s_"final" = s_1 sqcup s_2 sqcup dots.c sqcup s_n' />
+
+## 3. 두 가지 접근: CvRDT vs CmRDT
+
+CRDT는 구현 방식에 따라 두 가지로 나뉜다.
+
+### 3.1 State-based CRDT (CvRDT — Convergent)
+
+각 노드가 **전체 상태**를 주기적으로 전송하고, 수신 측에서 `merge` 함수로 합친다.
+
+```typescript filename="cvrdt-interface.ts"
+interface CvRDT<S> {
+  state: S;
+  query(): unknown;            // 현재 값 조회
+  update(args: unknown): void; // 로컬 상태 변경
+  merge(remote: S): void;      // merge(s) = this.state ⊔ remote
+}
+```
+
+**요구 조건**: `merge`가 join-semilattice의 ⊔ 연산이어야 한다 (교환, 결합, 멱등).
+
+**장점**:
+- 구현이 단순
+- 메시지 유실/중복에 강건 — 최신 상태만 전송하면 됨
+- 비신뢰 네트워크에 적합
+
+**단점**:
+- 전체 상태 전송 → 대역폭 비용 큼
+- 큰 데이터 구조에서는 비실용적 (→ delta-state CRDT로 개선, Part 2에서 다룸)
+
+### 3.2 Operation-based CRDT (CmRDT — Commutative)
+
+각 노드가 **연산(operation)**을 브로드캐스트한다. 수신 측에서 연산을 적용한다.
+
+```typescript filename="cmrdt-interface.ts"
+interface CmRDT<S> {
+  state: S;
+  query(): unknown;
+  // prepare: 로컬에서 연산 생성
+  prepare(args: unknown): Operation;
+  // effect: 원격 연산 적용
+  effect(op: Operation): void;
+}
+```
+
+**요구 조건**: 모든 **동시(concurrent)** 연산 쌍이 **교환적(commutative)**이어야 한다.
+
+**장점**:
+- 연산만 전송 → 작은 메시지
+- 대역폭 효율적
+
+**단점**:
+- **정확히 한 번(exactly-once)** 전달 필요 — 중복 적용 시 오류 가능
+- **인과적 순서(causal order)** 전달 필요 — 벡터 클럭 등 추가 인프라
+
+### 3.3 동치성
+
+Shapiro et al. (2011)은 CvRDT와 CmRDT가 **표현력이 동등**함을 보였다. CvRDT를 CmRDT로, CmRDT를 CvRDT로 변환할 수 있다. 실제 시스템에서는 네트워크 특성에 따라 적합한 방식을 선택한다.
+
+## 4. 대표 데이터 타입들
+
+### 4.1 G-Counter (Grow-only Counter)
+
+가장 단순한 CRDT. 증가만 가능한 카운터이다.
+
+각 노드 <Math expr='i' />가 자신만의 카운터 <Math expr='c_i' />를 관리한다. 전체 값은 모든 노드의 합이다:
+
+<Math display expr='"value" = sum_(i in N) c_i' />
+
+```typescript filename="g-counter.ts"
+class GCounter {
+  private counts: Map<string, number> = new Map();
+
+  constructor(private nodeId: string) {}
+
+  increment(): void {
+    const current = this.counts.get(this.nodeId) ?? 0;
+    this.counts.set(this.nodeId, current + 1);
+  }
+
+  value(): number {
+    let sum = 0;
+    for (const v of this.counts.values()) sum += v;
+    return sum;
+  }
+
+  merge(other: GCounter): void {
+    for (const [node, count] of other.counts) {
+      const local = this.counts.get(node) ?? 0;
+      this.counts.set(node, Math.max(local, count));
+    }
+  }
+}
+```
+
+Merge 연산은 각 엔트리의 `max` — 이것은 자연수에 대한 join-semilattice이다.
+
+<CRDTMergeSimulator />
+
+### 4.2 PN-Counter (Positive-Negative Counter)
+
+증가와 감소를 모두 지원한다. G-Counter 두 개를 사용한다:
+
+<Math display expr='"value" = sum P_i - sum N_i' />
+
+```typescript filename="pn-counter.ts"
+class PNCounter {
+  private P: GCounter; // increments
+  private N: GCounter; // decrements
+
+  constructor(nodeId: string) {
+    this.P = new GCounter(nodeId);
+    this.N = new GCounter(nodeId);
+  }
+
+  increment(): void { this.P.increment(); }
+  decrement(): void { this.N.increment(); }
+  value(): number { return this.P.value() - this.N.value(); }
+
+  merge(other: PNCounter): void {
+    this.P.merge(other.P);
+    this.N.merge(other.N);
+  }
+}
+```
+
+### 4.3 G-Set (Grow-only Set)
+
+원소 추가만 가능한 집합. Merge는 합집합이다.
+
+<Math display expr='"merge"(A, B) = A union B' />
+
+합집합은 교환적, 결합적, 멱등적이므로 join-semilattice를 형성한다.
+
+### 4.4 2P-Set (Two-Phase Set)
+
+추가와 제거를 지원한다. G-Set 두 개를 사용:
+
+- **A** (added set): 추가된 원소
+- **R** (removed set, tombstone set): 제거된 원소
+
+<Math display expr='"lookup"(e) = e in A and e in.not R' />
+
+한번 제거한 원소는 다시 추가할 수 없다 — 이것이 2P-Set의 핵심 제약이다.
+
+### 4.5 OR-Set (Observed-Remove Set)
+
+2P-Set의 제약을 해결한다. 각 `add` 연산에 고유 태그를 부여하고, `remove`는 **관찰 시점에 존재하는 태그만** 제거한다.
+
+```typescript filename="or-set.ts"
+type UniqueTag = string; // e.g., "nodeA:42"
+
+class ORSet<T> {
+  // element → set of unique tags
+  private elements: Map<T, Set<UniqueTag>> = new Map();
+  private counter = 0;
+
+  constructor(private nodeId: string) {}
+
+  add(element: T): void {
+    const tag: UniqueTag = `${this.nodeId}:${this.counter++}`;
+    if (!this.elements.has(element)) {
+      this.elements.set(element, new Set());
+    }
+    this.elements.get(element)!.add(tag);
+  }
+
+  remove(element: T): void {
+    // 현재 관찰된 모든 태그를 제거
+    this.elements.delete(element);
+  }
+
+  lookup(element: T): boolean {
+    const tags = this.elements.get(element);
+    return tags !== undefined && tags.size > 0;
+  }
+
+  merge(other: ORSet<T>): void {
+    // 양쪽의 태그 합집합
+    for (const [elem, tags] of other.elements) {
+      if (!this.elements.has(elem)) {
+        this.elements.set(elem, new Set());
+      }
+      for (const tag of tags) {
+        this.elements.get(elem)!.add(tag);
+      }
+    }
+  }
+}
+```
+
+핵심: 동시에 한 노드가 `add(x)`, 다른 노드가 `remove(x)`를 수행하면 — add가 새 태그를 만들었으므로 remove는 그 태그를 모르고, 결과적으로 **add가 이긴다(add-wins)**.
+
+### 4.6 LWW-Register (Last-Writer-Wins Register)
+
+가장 단순한 충돌 해결: 타임스탬프가 높은 쪽이 이긴다.
+
+<Math display expr='"merge"((v_1, t_1), (v_2, t_2)) = cases((v_1, t_1) &"if" t_1 > t_2, (v_2, t_2) &"if" t_2 > t_1)' />
+
+단순하지만, 시계 동기화(clock synchronization) 문제와 **동시 쓰기 중 하나가 사라지는** 문제가 있다. 이는 의도적인 설계 선택이며, 많은 실용적 시스템(Cassandra의 컬럼, Riak의 레지스터)이 이 전략을 사용한다.
+
+## 5. 요약
+
+| 타입 | 연산 | Merge 전략 | 제약 |
+|------|------|-----------|------|
+| G-Counter | increment | max per node | 증가만 가능 |
+| PN-Counter | increment, decrement | G-Counter × 2 | — |
+| G-Set | add | union | 추가만 가능 |
+| 2P-Set | add, remove | union × 2 | 재추가 불가 |
+| OR-Set | add, remove | tagged union | 메타데이터 오버헤드 |
+| LWW-Register | assign | timestamp 비교 | 동시 쓰기 소실 가능 |
+
+[Part 2](/posts/crdt-text-and-implementation)에서는 텍스트 CRDT(WOOT, RGA, YATA), Yjs·Automerge 구현 분석, 성능 트레이드오프를 다룬다.
+
+---
+
+## References
+
+1. Shapiro, M., Preguiça, N., Baquero, C., & Zawirski, M. (2011). *A comprehensive study of Convergent and Commutative Replicated Data Types*. INRIA Technical Report 7506.
+2. Shapiro, M., Preguiça, N., Baquero, C., & Zawirski, M. (2011). *Conflict-Free Replicated Data Types*. In Proc. SSS 2011, Springer LNCS 6976.
+3. Brewer, E. (2000). *Towards Robust Distributed Systems*. PODC 2000 Keynote.

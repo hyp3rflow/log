@@ -1,0 +1,356 @@
+---
+title: "CRDT — 충돌 없는 분산 데이터 동기화의 원리"
+date: 2026/03/05
+description: "Conflict-free Replicated Data Types의 수학적 기반부터 G-Counter, OR-Set, 텍스트 CRDT, Yjs 내부 구조까지 사실 기반으로 정리"
+tag: crdt
+author: Claude Opus 4.6
+---
+
+# CRDT — 충돌 없는 분산 데이터 동기화의 원리
+
+## 1. 문제 정의 — 왜 CRDT가 필요한가
+
+분산 시스템에서 여러 노드가 같은 데이터를 복제(replicate)하고 있을 때, 동시에 수정이 발생하면 **충돌**이 생긴다. 전통적인 접근은 중앙 서버가 충돌을 중재하거나, 잠금(lock)을 걸어 동시 수정을 막는 것이다. 그러나 이 방식은 두 가지 상황에서 무너진다:
+
+1. **네트워크 분단(partition)**: CAP 정리[^1]에 따르면, 네트워크가 분단되면 일관성(consistency)과 가용성(availability) 중 하나를 포기해야 한다. 중앙 서버와 연결이 끊기면 수정 자체가 불가능해진다.
+2. **오프라인 편집**: 모바일 앱이나 로컬 우선(local-first) 소프트웨어에서는 네트워크 없이도 데이터를 수정할 수 있어야 한다.
+
+CRDT(Conflict-free Replicated Data Type)는 이 문제를 **수학적 구조**로 해결한다. 핵심 아이디어는 단순하다:
+
+> 모든 복제본이 같은 업데이트 집합을 수신하면, 수신 순서와 무관하게 반드시 같은 상태로 수렴한다.
+
+이를 **Strong Eventual Consistency(SEC)**라 한다[^2]. 전통적인 Eventual Consistency가 "언젠가 같아질 것"이라는 약속이라면, SEC는 "같은 업데이트를 받은 순간 즉시 같다"는 더 강한 보장이다.
+
+---
+
+## 2. 수학적 기반 — Join-Semilattice
+
+CRDT의 수학적 기반은 **join-semilattice**다[^2].
+
+### 정의
+
+집합 <Math expr='S' />에 이항 연산 <Math expr='join' />(⊔)이 정의되어 다음 세 조건을 만족하면, <Math expr='(S, join)' />은 join-semilattice다:
+
+<Math display expr='
+x join x = x #h(1em) &("idempotent") \
+x join y = y join x #h(1em) &("commutative") \
+(x join y) join z = x join (y join z) #h(1em) &("associative")
+' />
+
+이 세 성질이 CRDT의 핵심이다. 어떤 순서로 merge하든, 중복해서 merge하든, 결과는 항상 같다.
+
+### Partial Order와 LUB
+
+Join-semilattice는 자연스럽게 **partial order** <Math expr='≤' />를 유도한다:
+
+<Math display expr='x <= y <==> x join y = y' />
+
+이때 <Math expr='x join y' />는 <Math expr='x' />와 <Math expr='y' />의 **LUB(least upper bound)**다. 상태는 항상 lattice 위에서 "위로만" 이동한다 — 즉 **단조 증가(monotonically increasing)**한다. 한번 올라간 상태는 내려오지 않는다. 이 단조성이 eventual consistency를 보장한다.
+
+---
+
+## 3. 두 가지 접근 — CvRDT vs CmRDT
+
+Shapiro et al.[^2]은 CRDT를 두 가지 방식으로 분류한다.
+
+### State-based CRDT (CvRDT)
+
+**전체 상태를 전송**하고, 수신 측에서 merge(= join) 연산으로 합친다.
+
+```text filename="CvRDT 프로토콜"
+1. 각 노드는 로컬 상태 s를 유지
+2. 로컬 업데이트: s = update(s, args)
+3. 주기적으로 다른 노드에 s를 전송
+4. 수신 시: s = merge(s_local, s_remote)
+```
+
+merge가 join-semilattice의 ⊔ 연산이면, 어떤 순서로 몇 번 merge하든 결과가 같다. 이것이 CvRDT의 수렴 보장이다.
+
+**장점**: 전송 채널에 대한 요구사항이 낮다. 메시지 중복, 순서 변경에 모두 안전하다.
+**단점**: 매번 전체 상태를 전송하므로 상태가 크면 비효율적이다.
+
+### Operation-based CRDT (CmRDT)
+
+**연산(operation)만 전송**한다. 수신 측에서 연산을 그대로 적용한다.
+
+```text filename="CmRDT 프로토콜"
+1. 로컬 업데이트: prepare(args) → op
+2. op를 다른 모든 노드에 브로드캐스트
+3. 수신 시: s = apply(s, op)
+```
+
+연산이 **교환 가능(commutative)**하면 — 즉 `apply(apply(s, op1), op2) = apply(apply(s, op2), op1)` — 수신 순서와 무관하게 결과가 같다. 단, **정확히 한 번(exactly-once)** 전달과 **인과 순서(causal delivery)** 보장이 필요하다[^2].
+
+**장점**: 연산만 전송하므로 네트워크 효율적이다.
+**단점**: 전송 계층에 stronger guarantee가 필요하다.
+
+두 방식은 이론적으로 동치다 — 하나를 다른 하나로 변환할 수 있다[^2].
+
+---
+
+## 4. 대표 데이터 타입들
+
+### G-Counter (Grow-only Counter)
+
+가장 단순한 CRDT다. 증가만 가능한 카운터다. 각 노드가 자신만의 슬롯을 갖고, merge 시 각 슬롯의 max를 취한다.
+
+```typescript filename="g-counter.ts"
+type GCounter = Record<string, number>; // nodeId → count
+
+function increment(counter: GCounter, nodeId: string): GCounter {
+  return { ...counter, [nodeId]: (counter[nodeId] ?? 0) + 1 };
+}
+
+function value(counter: GCounter): number {
+  return Object.values(counter).reduce((sum, n) => sum + n, 0);
+}
+
+function merge(a: GCounter, b: GCounter): GCounter {
+  const result: GCounter = { ...a };
+  for (const [nodeId, count] of Object.entries(b)) {
+    result[nodeId] = Math.max(result[nodeId] ?? 0, count);
+  }
+  return result;
+}
+```
+
+merge가 idempotent, commutative, associative임은 `Math.max`의 성질에서 바로 따라온다.
+
+<GCounterMergeSimulator />
+
+### PN-Counter (Positive-Negative Counter)
+
+G-Counter 두 개를 조합하면 증가와 감소가 모두 가능한 카운터가 된다:
+
+```typescript filename="pn-counter.ts"
+type PNCounter = { p: GCounter; n: GCounter };
+
+function increment(c: PNCounter, nodeId: string): PNCounter {
+  return { ...c, p: incrementG(c.p, nodeId) };
+}
+
+function decrement(c: PNCounter, nodeId: string): PNCounter {
+  return { ...c, n: incrementG(c.n, nodeId) };
+}
+
+function value(c: PNCounter): number {
+  return valueG(c.p) - valueG(c.n);
+}
+
+function merge(a: PNCounter, b: PNCounter): PNCounter {
+  return { p: mergeG(a.p, b.p), n: mergeG(a.n, b.n) };
+}
+```
+
+### G-Set (Grow-only Set)
+
+원소 추가만 가능한 집합이다. merge는 합집합이다:
+
+<Math display expr='"merge"(A, B) = A union B' />
+
+합집합은 idempotent, commutative, associative하므로 자동으로 join-semilattice다.
+
+### 2P-Set (Two-Phase Set)
+
+G-Set 두 개(추가 집합 A, 제거 집합 R)를 조합한다. 한 번 제거된 원소는 다시 추가할 수 없다:
+
+<Math display expr='"lookup"(e) = e in A and e in.not R' />
+
+<Math display expr='"merge"((A_1, R_1), (A_2, R_2)) = (A_1 union A_2, R_1 union R_2)' />
+
+### OR-Set (Observed-Remove Set)
+
+2P-Set의 "한 번 지우면 끝" 제한을 극복한다. 각 추가 연산에 고유 태그를 부여하고, 제거 시 **관찰된(observed) 태그만** 제거한다[^2]:
+
+```typescript filename="or-set.ts"
+type Tag = string; // unique identifier
+type ORSet<T> = Map<T, Set<Tag>>;
+
+function add<T>(set: ORSet<T>, element: T, tag: Tag): ORSet<T> {
+  const next = new Map(set);
+  const tags = new Set(next.get(element) ?? []);
+  tags.add(tag);
+  next.set(element, tags);
+  return next;
+}
+
+function remove<T>(set: ORSet<T>, element: T): ORSet<T> {
+  const next = new Map(set);
+  next.delete(element); // 현재 관찰된 모든 태그 제거
+  return next;
+}
+
+function merge<T>(a: ORSet<T>, b: ORSet<T>): ORSet<T> {
+  const result: ORSet<T> = new Map();
+  const allKeys = new Set([...a.keys(), ...b.keys()]);
+  for (const key of allKeys) {
+    const tagsA = a.get(key) ?? new Set();
+    const tagsB = b.get(key) ?? new Set();
+    const merged = new Set([...tagsA, ...tagsB]);
+    if (merged.size > 0) result.set(key, merged);
+  }
+  return result;
+}
+```
+
+**Add-wins semantics**: 동시에 한 노드가 추가하고 다른 노드가 제거하면, 추가가 이긴다. 제거 노드는 추가의 태그를 관찰하지 못했으므로 해당 태그가 살아남는다.
+
+### LWW-Register (Last-Writer-Wins Register)
+
+가장 단순한 레지스터 CRDT다. 각 쓰기에 타임스탬프를 붙이고, merge 시 더 큰 타임스탬프가 이긴다:
+
+```typescript filename="lww-register.ts"
+type LWWRegister<T> = { value: T; timestamp: number };
+
+function assign<T>(value: T, timestamp: number): LWWRegister<T> {
+  return { value, timestamp };
+}
+
+function merge<T>(a: LWWRegister<T>, b: LWWRegister<T>): LWWRegister<T> {
+  return a.timestamp >= b.timestamp ? a : b;
+}
+```
+
+타임스탬프의 전순서(total order)가 max를 정의하고, max는 join-semilattice를 형성한다. 단, 정확한 시계 동기화가 전제된다.
+
+---
+
+## 5. 텍스트 CRDT — 협업 편집의 핵심
+
+위의 CRDT들은 비교적 단순한 데이터 구조다. **텍스트 편집**은 훨씬 어렵다. 문자열은 **순서가 있는 시퀀스**이고, 동시 삽입이 같은 위치에서 발생하면 삽입 순서를 결정해야 한다[^5].
+
+### Position Identifier 기반
+
+LSEQ[^5]와 Logoot은 각 문자에 **위치 식별자(position identifier)**를 부여한다. 식별자는 실수처럼 동작한다 — 두 문자 사이에 항상 새 식별자를 만들 수 있다. 실제로는 가변 길이 비트열을 사용한다.
+
+```text filename="position identifier 예시"
+위치:  0.25    0.5     0.75
+문자:   H       e       l
+
+"H"와 "e" 사이에 삽입 → 0.375에 배치
+```
+
+**문제**: 교차 편집(interleaving). 두 노드가 같은 위치에 각각 문자열을 삽입하면, 문자가 뒤섞일 수 있다[^5].
+
+### Linked List 기반 — RGA와 YATA
+
+**RGA(Replicated Growable Array)**[^6]는 연결 리스트 구조를 사용한다. 각 문자는 고유 ID(replica ID + sequence number)를 가지며, 삽입 시 참조 위치(left origin)를 기록한다. 같은 위치에 동시 삽입이 발생하면 **ID의 전순서**로 결정한다.
+
+**YATA(Yet Another Transformation Approach)**는 Yjs의 기반 알고리즘이다[^4]. RGA와 유사하지만, 각 아이템이 **left origin**과 **right origin**을 모두 기록한다. 동시 삽입 충돌 시 규칙은:
+
+1. 같은 left origin을 가진 아이템들 사이에서
+2. right origin의 위치를 비교하여 순서를 결정
+3. 그래도 같으면 replica ID로 결정
+
+이 규칙은 interleaving 문제를 방지한다[^4].
+
+---
+
+## 6. Yjs 내부 구조
+
+Yjs[^4]는 가장 널리 사용되는 텍스트 CRDT 라이브러리다. Tiptap, BlockNote, Lexical 등 다수의 에디터가 Yjs를 동기화 레이어로 사용한다. 핵심 구조를 소스 코드 기준으로 정리한다.
+
+### Doc
+
+최상위 컨테이너다. 하나의 `Doc`이 하나의 공유 문서를 표현한다. 내부에 여러 개의 shared type(`YText`, `YMap`, `YArray` 등)을 가질 수 있다.
+
+### Item
+
+모든 데이터의 기본 단위다. Yjs 소스의 `Item` 구조[^4]는 다음 필드를 포함한다:
+
+```typescript filename="Item (simplified)"
+interface Item {
+  id: { client: number; clock: number }; // 고유 식별자
+  left: Item | null;      // 왼쪽 이웃
+  right: Item | null;     // 오른쪽 이웃
+  origin: ID | null;      // 삽입 시 left origin의 ID
+  rightOrigin: ID | null; // 삽입 시 right origin의 ID
+  content: Content;        // 실제 데이터 (문자열, embed 등)
+  deleted: boolean;        // tombstone 여부
+}
+```
+
+`id`는 `(client, clock)` 쌍이다. `client`는 각 클라이언트의 고유 번호, `clock`은 해당 클라이언트의 논리적 시계(Lamport clock 유사)다. 이 ID가 아이템의 전역적 고유 식별자이자 인과 순서의 기반이다.
+
+### StructStore
+
+모든 `Item`을 client별로 정렬된 배열에 저장한다:
+
+```typescript filename="StructStore (simplified)"
+// client → Items sorted by clock
+type StructStore = Map<number, Item[]>;
+```
+
+특정 ID의 아이템을 찾을 때 이진 탐색을 사용하므로 <Math expr='O(log n)' />에 접근 가능하다.
+
+### DeleteSet
+
+삭제된 아이템의 ID 범위를 저장한다. 삭제 시 아이템을 실제로 제거하지 않고 `deleted = true`로 표시(tombstone)한 뒤, 삭제 정보를 `DeleteSet`에 기록한다:
+
+```typescript filename="DeleteSet (simplified)"
+// client → sorted list of { clock, length } ranges
+type DeleteSet = Map<number, { clock: number; len: number }[]>;
+```
+
+### 동기화 프로토콜
+
+두 클라이언트가 동기화할 때:
+
+1. **State Vector 교환**: 각 client의 최대 clock 값을 교환한다.
+2. **Missing Items 전송**: 상대방이 모르는 아이템만 전송한다.
+3. **DeleteSet 전송**: 삭제 정보를 전송한다.
+
+이는 delta-state CRDT의 아이디어와 일치한다 — 전체 상태가 아니라 차이만 전송한다.
+
+---
+
+## 7. 성능과 트레이드오프
+
+### 메타데이터 오버헤드
+
+CRDT의 가장 큰 비용은 **메타데이터**다. OR-Set은 각 원소에 고유 태그를 유지해야 하고, 텍스트 CRDT는 각 문자에 ID, origin, 이웃 포인터를 저장해야 한다. Yjs의 경우 단일 문자를 저장하는 데 최소한 `(client, clock, origin, rightOrigin, left, right, deleted)` 7개 필드가 필요하다.
+
+실제로는 Yjs가 연속된 문자를 하나의 아이템으로 묶는 **run-length encoding** 최적화를 적용하여 오버헤드를 크게 줄인다.
+
+### Tombstone 문제와 GC
+
+삭제된 아이템을 즉시 제거할 수 없다 — 아직 해당 아이템을 참조하는 원격 연산이 도착할 수 있기 때문이다. 따라서 삭제된 아이템은 **tombstone**으로 남는다. 시간이 지나면 tombstone이 누적되어 메모리와 성능에 영향을 미친다.
+
+GC(Garbage Collection) 전략:
+
+- **Yjs**: 삭제된 아이템의 content만 해제하고 구조(ID, origin)는 유지한다. 완전한 GC는 모든 클라이언트가 동의해야 가능하므로 분산 환경에서 어렵다.
+- **Causal stability**: 모든 노드가 특정 시점 이전의 모든 연산을 수신했음을 확인한 후, 그 이전의 tombstone을 안전하게 제거할 수 있다. 그러나 오프라인 노드가 있으면 이 시점이 진행되지 않는다.
+
+### Delta-state CRDT
+
+CvRDT의 "전체 상태 전송" 비효율을 해결한다. 마지막 동기화 이후 변경된 부분(delta)만 전송한다. Delta들도 join-semilattice를 형성하므로 CvRDT의 수렴 보장을 유지한다[^3].
+
+Yjs의 동기화 프로토콜이 바로 delta-state 방식이다 — state vector를 교환하고 상대가 모르는 아이템만 보낸다.
+
+### OT vs CRDT
+
+비교 대상인 OT(Operational Transformation)는 중앙 서버가 연산을 변환(transform)하여 충돌을 해결한다. Google Docs가 대표적이다. OT는 중앙 서버 의존적이고 정확성 증명이 어렵지만[^3], 메타데이터 오버헤드가 적다. CRDT는 서버 없이도 동작하지만 메타데이터 비용을 지불한다. 어떤 것이 "더 좋다"고 단정할 수 없다 — 요구사항에 따라 선택이 달라진다.
+
+---
+
+## 요약
+
+| 속성 | 핵심 메커니즘 |
+|---|---|
+| 수학적 기반 | join-semilattice (idempotent, commutative, associative merge) |
+| CvRDT | 전체 상태 전송 + merge |
+| CmRDT | 연산 전송 + commutative apply |
+| 텍스트 CRDT | position identifier 또는 linked list + unique ID |
+| 수렴 보장 | 단조 증가 상태 + LUB 존재 → SEC |
+| 주요 비용 | 메타데이터 오버헤드, tombstone 누적 |
+
+CRDT는 "충돌을 해결"하는 것이 아니라, 수학적 구조를 통해 **충돌이 발생할 수 없게** 만든다. 이것이 이름에 "Conflict-free"가 들어가는 이유다.
+
+---
+
+[^1]: Brewer, E., "CAP twelve years later: How the 'rules' have changed" (IEEE Computer, 2012)
+[^2]: Shapiro, M., Preguiça, N., Baquero, C., Zawirski, M., "A comprehensive study of Convergent and Commutative Replicated Data Types" (INRIA TR 7506, 2011); Shapiro et al., "Conflict-Free Replicated Data Types" (SSS 2011)
+[^3]: Kleppmann, M., Beresford, A. R., "A Conflict-Free Replicated JSON Datatype" (2017)
+[^4]: Nicolaescu, D., Jahber, D., Derntl, M., Klamma, R., "Yjs: A Framework for Near Real-Time P2P Shared Editing on Arbitrary Data Types" (ICWE 2016); Yjs source: https://github.com/yjs/yjs
+[^5]: Attiya, H., Burckhardt, S., Gotsman, A., Morrison, A., Yang, H., Zawirski, M., "Specification and Complexity of Collaborative Text Editing" (PODC 2016)
+[^6]: Roh, H.-G., Jeon, M., Kim, J.-S., Lee, J., "Replicated abstract data types: Building blocks for collaborative applications" (Journal of Parallel and Distributed Computing, 2011)

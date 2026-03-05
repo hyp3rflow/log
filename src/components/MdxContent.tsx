@@ -17,6 +17,12 @@ import AttentionComparisonDiagram from "@/components/blog/AttentionComparisonDia
 import HBMStackDiagram from "@/components/blog/HBMStackDiagram";
 import RNNvsTransformerDiagram from "@/components/blog/RNNvsTransformerDiagram";
 import Math from "@/components/blog/Math";
+import GCounterMergeSimulator from "@/components/blog/GCounterMergeSimulator";
+import BezierCurveEditor from "@/components/blog/BezierCurveEditor";
+import RasterizationSimulator from "@/components/blog/RasterizationSimulator";
+import SubpixelComparison from "@/components/blog/SubpixelComparison";
+import CRDTMergeSimulator from "@/components/blog/CRDTMergeSimulator";
+import TextCRDTSimulator from "@/components/blog/TextCRDTSimulator";
 import SelfAttentionDiagram from "@/components/blog/SelfAttentionDiagram";
 import SeqModelsDiagram from "@/components/blog/SeqModelsDiagram";
 import RNNCellDiagram from "@/components/blog/RNNCellDiagram";
@@ -152,6 +158,12 @@ const mdxComponents = {
   HBMStackDiagram,
   RNNvsTransformerDiagram,
   Math,
+  GCounterMergeSimulator,
+  BezierCurveEditor,
+  RasterizationSimulator,
+  SubpixelComparison,
+  CRDTMergeSimulator,
+  TextCRDTSimulator,
   RNNCellDiagram,
   SelfAttentionDiagram,
   SeqModelsDiagram,
