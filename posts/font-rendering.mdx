@@ -1,0 +1,405 @@
+---
+title: "폰트 렌더링: 벡터 아웃라인에서 픽셀까지"
+date: 2026/03/05
+description: "벡터 폰트 아웃라인이 화면의 픽셀로 변환되는 전체 과정을 다룬다. 폰트 포맷, 래스터화, 힌팅, 안티앨리어싱, 텍스트 셰이핑, GPU 렌더링까지."
+tag: font-rendering
+author: Claude Opus 4.6
+---
+
+# 폰트 렌더링: 벡터 아웃라인에서 픽셀까지
+
+## 1. 문제 정의
+
+화면에 글자를 표시하는 일은 **벡터 아웃라인을 래스터 픽셀로 변환**하는 문제다. 폰트 파일에는 각 글리프(glyph)의 윤곽선이 수학적 곡선으로 저장되어 있다. 이 곡선은 해상도에 독립적이다 — 아무리 확대해도 부드러운 곡선이 유지된다. 그러나 디스플레이는 이산적인(discrete) 픽셀 격자이므로, 연속적인 곡선을 유한한 격자 위에 매핑해야 한다.
+
+이 과정에서 두 가지 상충하는 목표가 존재한다:
+
+- **해상도 독립성(resolution independence)**: 곡선의 원래 형태를 최대한 충실하게 재현
+- **픽셀 그리드 정합(grid fitting)**: 픽셀 경계에 맞추어 선명한 결과를 생성
+
+고해상도 디스플레이(예: 200+ PPI)에서는 픽셀이 충분히 작아서 첫 번째 목표만으로도 좋은 결과를 얻을 수 있다. 그러나 96 PPI 수준의 디스플레이에서는 12pt 글자의 세로 획이 1~2 픽셀밖에 되지 않으므로, 그리드 정합 없이는 흐릿하거나 불균일한 결과가 나온다.
+
+이 글에서는 이 변환의 전체 파이프라인을 추적한다: 폰트 포맷 → 래스터화 → 힌팅 → 안티앨리어싱 → 텍스트 셰이핑 → GPU 렌더링 → 실제 구현 스택.
+
+## 2. 폰트 포맷
+
+### 2.1 TrueType — 2차 베지어 곡선
+
+Apple이 1991년에 설계하고 Microsoft가 채택한 TrueType은 **2차 베지어 곡선(quadratic Bézier curve)**으로 글리프 윤곽선을 정의한다[^1]. 하나의 세그먼트는 시작점 <Math expr='P_0' />, 제어점 <Math expr='P_1' />, 끝점 <Math expr='P_2' /> 세 점으로 결정된다:
+
+<Math display expr='B(t) = (1 - t)^2 P_0 + 2(1 - t) t P_1 + t^2 P_2, quad t in [0, 1]' />
+
+TrueType 폰트 파일(`.ttf`) 내부에서 글리프 데이터는 `glyf` 테이블에 저장된다. 각 글리프는 하나 이상의 **컨투어(contour)** — 닫힌 경로 — 로 구성되며, 컨투어는 **on-curve 포인트**와 **off-curve 포인트**의 시퀀스로 표현된다[^1]:
+
+- **On-curve point**: 곡선 위의 점. 베지어 세그먼트의 시작점 또는 끝점.
+- **Off-curve point**: 곡선 밖의 제어점. 연속된 두 off-curve 포인트 사이에는 암묵적으로 그 중점에 on-curve 포인트가 삽입된다.
+
+이 암묵적 on-curve 포인트 규칙 덕분에 매끄러운 곡선을 적은 데이터로 표현할 수 있다. 예를 들어, 원형에 가까운 곡선은 off-curve 포인트만 나열해도 된다.
+
+```text filename="glyf 테이블 구조 (개념적)"
+Glyph Header:
+  numberOfContours: 2          # 외곽 + 내부 구멍 (예: 'o')
+  xMin, yMin, xMax, yMax       # 바운딩 박스
+
+Contour 0 (외곽):
+  Point 0: (200, 0)    on-curve
+  Point 1: (400, 100)  off-curve
+  Point 2: (500, 300)  on-curve
+  ...
+
+Contour 1 (내부):
+  Point 0: (250, 100)  on-curve
+  ...
+```
+
+### 2.2 OpenType/CFF — 3차 베지어 곡선
+
+Adobe의 PostScript 폰트 기술에 기반한 CFF(Compact Font Format)는 **3차 베지어 곡선(cubic Bézier curve)**을 사용한다[^2]. 제어점이 두 개이므로 곡선의 자유도가 높다:
+
+<Math display expr='B(t) = (1 - t)^3 P_0 + 3(1 - t)^2 t P_1 + 3(1 - t) t^2 P_2 + t^3 P_3, quad t in [0, 1]' />
+
+CFF 데이터는 OpenType 폰트(`.otf`) 내의 `CFF ` 또는 `CFF2` 테이블에 저장된다. TrueType의 좌표 배열 방식과 달리, CFF는 PostScript의 **CharString** 바이트코드로 윤곽선을 인코딩한다. `rmoveto`, `rlineto`, `rrcurveto` 같은 드로잉 명령어들의 시퀀스다.
+
+3차 곡선은 2차 곡선의 상위 집합이다. 2차 베지어를 3차 베지어로 변환하는 것은 항상 가능하지만(승격, degree elevation), 역변환은 일반적으로 근사만 가능하다.
+
+### 2.3 cmap — 문자에서 글리프로
+
+유니코드 코드포인트를 글리프 인덱스(GID)에 매핑하는 것은 `cmap` 테이블의 역할이다[^2]. 텍스트 렌더링 파이프라인의 첫 단계에서 문자열의 각 문자가 `cmap`을 통해 글리프 ID로 변환된다. 단, 리거쳐나 복잡한 스크립트에서는 이 1:1 매핑으로 충분하지 않으며, 셰이핑 엔진(6절)이 개입한다.
+
+아래 에디터에서 2차 베지어 곡선의 제어점을 드래그하여 곡선 형태가 어떻게 변하는지 확인할 수 있다:
+
+<BezierCurveEditor />
+
+## 3. 래스터화
+
+벡터 윤곽선을 가져왔으면 이를 픽셀 격자 위에 그려야 한다. 이것이 **래스터화(rasterization)**다.
+
+### 3.1 스캔라인 래스터화
+
+가장 전통적인 방법은 **스캔라인(scanline)** 방식이다. 각 수평 스캔라인(y 좌표 고정)에서 윤곽선과의 교차점을 구하고, 교차점들 사이를 채운다.
+
+기본 절차:
+
+1. 각 수평 행(scanline)에 대해 모든 윤곽선 세그먼트와의 교차 x좌표를 계산
+2. 교차점을 x 좌표 순으로 정렬
+3. **채우기 규칙(fill rule)**에 따라 내부/외부를 결정하여 픽셀을 채움
+
+### 3.2 채우기 규칙: Even-Odd vs Non-Zero Winding
+
+어떤 점이 글리프의 "내부"인지 판별하는 두 가지 규칙이 있다[^3]:
+
+**Even-Odd 규칙**: 한 점에서 임의의 방향으로 반직선을 쏘아, 윤곽선과 교차하는 횟수를 센다. 홀수면 내부, 짝수면 외부.
+
+**Non-Zero Winding Number 규칙**: 교차할 때 윤곽선의 방향(왼→오른 vs 오른→왼)을 고려한다. 왼→오른 교차는 +1, 반대는 −1로 누적하여, 합이 0이 아니면 내부다.
+
+<Math display expr='"winding" = sum_i d_i, quad d_i = cases(+1 &"if left-to-right", -1 &"if right-to-left")' />
+
+TrueType과 OpenType 모두 non-zero winding 규칙을 사용한다. 이 규칙 하에서 컨투어의 방향이 중요하다 — 외곽 컨투어는 시계 방향, 내부 구멍은 반시계 방향(또는 그 반대)으로 감아야 올바르게 렌더링된다.
+
+### 3.3 커버리지 계산
+
+안티앨리어싱(5절)을 위해서는 각 픽셀이 글리프 내부에 **얼마나** 들어가는지 — **커버리지(coverage)** — 를 계산해야 한다. 픽셀을 0.0(완전히 외부)부터 1.0(완전히 내부)까지의 값으로 표현한다.
+
+<Math display expr='"coverage"(x, y) = "Area"("pixel"(x, y) inter "glyph") / "Area"("pixel"(x, y))' />
+
+정확한 해석적(analytical) 커버리지 계산은 가능하지만 비용이 크다. 실용적으로는 픽셀을 여러 **서브픽셀 샘플**로 분할하여 내부에 있는 샘플 비율로 근사한다. FreeType의 래스터라이저(`smooth` 렌더러)는 256단계(8비트)의 커버리지 값을 계산한다[^3].
+
+아래 시뮬레이터에서 확대된 픽셀 그리드 위에서 커버리지 계산이 어떻게 이루어지는지 확인할 수 있다:
+
+<RasterizationSimulator />
+
+### 3.4 FreeType의 래스터라이저
+
+FreeType 라이브러리의 안티앨리어싱 래스터라이저는 `src/smooth/ftgrays.c`에 구현되어 있다[^3]. 이 래스터라이저는 **영역 기반(area-based)** 접근을 사용한다:
+
+1. 윤곽선의 각 세그먼트(직선 또는 베지어 곡선)를 순회
+2. 각 세그먼트가 지나는 픽셀 셀에 대해, 해당 셀 내에서의 **커버리지 변화량**을 누적
+3. 왼쪽에서 오른쪽으로 스캔하며 누적 커버리지를 최종 알파 값으로 변환
+
+이 방식은 전통적인 스캔라인 + 교차점 정렬보다 효율적이다. 곡선을 직접 셀 단위로 래스터화하므로 교차점 정렬 단계가 필요 없다.
+
+## 4. 힌팅
+
+### 4.1 문제: 저해상도에서의 글리프 왜곡
+
+12pt 폰트를 96 DPI에서 렌더링하면 em당 약 16 픽셀이다. 알파벳 소문자의 세로 획 너비는 1~2 픽셀 수준이 된다. 이 해상도에서 벡터 윤곽선을 그대로 래스터화하면:
+
+- 같은 너비여야 할 획들이 1픽셀/2픽셀로 들쭉날쭉
+- 세리프(serif)의 미세한 차이가 뭉개지거나 사라짐
+- 좌우 대칭이어야 할 글자가 비대칭으로 렌더링
+
+**힌팅(hinting)**은 이 문제를 해결하기 위해 윤곽선의 주요 특성점(feature point)을 픽셀 격자에 **스냅(snap)**하는 기술이다.
+
+### 4.2 TrueType 힌팅: 바이트코드 VM
+
+TrueType의 힌팅 시스템은 글리프에 포함된 **바이트코드 프로그램**으로 구현된다[^1]. 각 글리프의 `glyf` 테이블 엔트리에는 윤곽선 데이터 뒤에 힌팅 명령어(instructions)가 올 수 있다.
+
+이 명령어들은 **스택 기반 가상 머신(VM)**에서 실행된다. TrueType 인터프리터의 구조:
+
+- **스택**: 값을 push/pop하는 오퍼랜드 스택
+- **CVT (Control Value Table)**: 폰트 전역의 제어 값 (예: 스템 너비, x-height)
+- **스토리지 영역**: 임시 변수 저장
+- **그래픽 스테이트**: 자유 벡터(freedom vector), 프로젝션 벡터(projection vector) 등
+
+주요 명령어 예시:
+
+```text filename="TrueType 힌팅 명령어 (개념)"
+PUSHB[0] 12       # 스택에 12 push (포인트 번호)
+SRP0[]             # 참조 포인트 0 설정
+PUSHB[0] 15       # 스택에 15 push
+MIRP[01100]        # 참조 포인트와 포인트 15 사이 거리를
+                   # CVT 값에 라운딩하여 이동
+```
+
+`MIRP`(Move Indirect Relative Point)는 두 포인트 간 거리를 CVT에 지정된 "이상적 거리"에 맞추어 조정한다. 이렇게 획 너비가 정수 픽셀로 라운딩된다.
+
+TrueType 힌팅은 매우 강력하지만, 좋은 힌팅을 작성하려면 폰트 디자이너가 사실상 **프로그래밍**을 해야 한다. 고품질 TrueType 힌팅은 수천 줄의 바이트코드를 포함할 수 있다.
+
+### 4.3 PostScript/CFF 힌팅: 스템과 블루존
+
+CFF 폰트의 힌팅은 TrueType보다 훨씬 선언적이다. 폰트 디자이너는 다음을 선언한다[^2]:
+
+- **스템 힌트(stem hints)**: 수평/수직 획의 위치와 너비. `hstem`, `vstem` 명령어로 기술.
+- **블루존(blue zones)**: 기준선(baseline), x-height, cap height 등 주요 정렬 높이. Private DICT에 `BlueValues`로 저장.
+
+래스터라이저가 이 선언을 해석하여 자동으로 그리드 정합을 수행한다. 디자이너는 "이 획의 너비는 85 유닛이고 위치는 y=200"이라고 선언하기만 하면, 래스터라이저가 가장 가까운 픽셀 경계에 맞춘다.
+
+CFF의 힌팅은 더 간결하지만, 래스터라이저 구현에 따라 결과가 달라질 수 있다. TrueType은 폰트가 래스터라이저에게 **정확한 지시**를 내리므로 결과가 결정적이다.
+
+### 4.4 FreeType Autohinter
+
+수동 힌팅이 없는 폰트를 위해 FreeType은 **autohinter**를 제공한다[^3]. `src/autofit/` 디렉토리에 구현되어 있으며, 다음 과정을 거친다:
+
+1. 글리프 윤곽선에서 세그먼트(직선 구간)와 엣지(정렬 가능한 세그먼트 그룹)를 자동 감지
+2. 세그먼트를 연결하여 **스템(stem)**으로 인식 — 같은 방향의 평행한 두 엣지
+3. 블루존을 폰트 메트릭에서 추론
+4. 스템과 블루존을 기준으로 포인트를 그리드에 스냅
+
+이 과정은 스크립트별로 다르게 동작한다. 라틴, CJK, 인도계 스크립트 등에 대해 각각의 분석 로직이 있다.
+
+## 5. 안티앨리어싱
+
+### 5.1 그레이스케일 안티앨리어싱
+
+가장 기본적인 안티앨리어싱은 3.3절의 커버리지 값을 그대로 픽셀의 알파(불투명도)로 사용하는 것이다. 글리프 내부 100%인 픽셀은 전경색 그대로, 경계에 걸친 픽셀은 전경색과 배경색의 중간 톤으로 표시된다.
+
+이것만으로도 계단 현상(aliasing)이 크게 줄어든다. 그러나 각 픽셀을 하나의 그레이 값으로 처리하므로, 디스플레이의 물리적 구조를 활용하지 못한다.
+
+### 5.2 서브픽셀 렌더링
+
+대부분의 LCD 디스플레이에서 하나의 "픽셀"은 실제로는 수평으로 배열된 **R, G, B 세 개의 서브픽셀**로 구성된다. 이 구조를 활용하면 수평 해상도를 사실상 **3배**로 높일 수 있다. 이것이 Microsoft의 ClearType과 동일한 원리다[^8].
+
+작동 원리:
+
+1. 글리프를 수평 해상도 3배로 래스터화한다 (각 픽셀을 3개의 서브픽셀로 분할)
+2. 3개의 커버리지 값을 각각 R, G, B 채널에 할당한다
+3. **LCD 필터링**을 적용하여 색번짐(color fringing)을 완화한다
+
+예를 들어, 수직 획의 경계가 픽셀 중앙에 위치한다고 하자. 그레이스케일 AA에서는 해당 픽셀이 50% 그레이가 된다. 서브픽셀 렌더링에서는 왼쪽 서브픽셀(R)은 100%, 중앙(G)은 50%, 오른쪽(B)은 0%일 수 있다 — 이는 수직 경계의 위치를 서브픽셀 정밀도로 표현하는 것이다.
+
+### 5.3 LCD 필터링
+
+서브픽셀 렌더링의 부작용은 **색번짐(color fringing)**이다. 흰 배경에 검은 글자를 그릴 때, 획 경계에서 빨강이나 파랑 색조가 보일 수 있다.
+
+이를 줄이기 위해 **LCD 필터(FIR 필터)**를 적용한다. 인접 서브픽셀의 값을 가중 평균하여 급격한 채널 간 차이를 완화한다. FreeType의 기본 LCD 필터 커널은[^3]:
+
+<Math display expr='[1/16, 4/16, 6/16, 4/16, 1/16]' />
+
+이 5-탭 FIR 필터는 서브픽셀 정밀도의 이점을 어느 정도 유지하면서 색번짐을 억제한다. 필터가 너무 강하면 서브픽셀 렌더링의 이점이 사라지고 그레이스케일 AA와 차이가 없어진다.
+
+### 5.4 감마 보정
+
+디스플레이의 물리적 밝기와 sRGB 값 사이의 비선형 관계(감마)를 고려하지 않으면, 안티앨리어싱된 텍스트가 **실제보다 가늘어** 보일 수 있다. 이유는 다음과 같다:
+
+sRGB에서 50%에 해당하는 값(128/255)의 실제 물리적 밝기는 약 22%다 — sRGB의 감마가 대략 2.2이기 때문이다. 검은 글자(0)와 흰 배경(255) 사이의 50% 커버리지 픽셀은 시각적으로 "50%의 중간"이 아니라 더 어둡게 보인다.
+
+이를 보정하려면 블렌딩을 **선형 광도(linear light)** 공간에서 수행해야 한다:
+
+<Math display expr='"blended"_"linear" = "coverage" dot "fg"_"linear" + (1 - "coverage") dot "bg"_"linear"' />
+
+그 후 결과를 다시 sRGB로 인코딩한다. macOS의 Core Text는 이 감마 보정을 수행하여 Windows 대비 약간 더 굵어 보이는 텍스트를 렌더링하는 것으로 알려져 있다.
+
+아래에서 그레이스케일 안티앨리어싱과 서브픽셀 렌더링의 차이를 확대하여 비교할 수 있다:
+
+<SubpixelComparison />
+
+## 6. 텍스트 셰이핑
+
+문자열을 화면에 그리려면 단순히 글리프를 나열하는 것으로 충분하지 않다. **텍스트 셰이핑(text shaping)**은 문자열을 올바른 글리프 시퀀스와 위치로 변환하는 과정이다[^4].
+
+### 6.1 파이프라인
+
+전체 파이프라인은 다음과 같다:
+
+1. **글리프 선택**: `cmap` 테이블로 유니코드 코드포인트 → 글리프 ID
+2. **셰이핑**: OpenType 레이아웃 테이블(`GSUB`, `GPOS`)의 규칙을 적용하여 글리프 치환/배치
+3. **래스터화**: 최종 글리프를 비트맵으로 변환
+
+### 6.2 GSUB — 글리프 치환
+
+`GSUB`(Glyph Substitution) 테이블은 글리프를 다른 글리프로 **치환**하는 규칙을 정의한다[^2]:
+
+- **리거쳐(ligature)**: `f` + `i` → `fi` 합자
+- **대체 형태**: 아랍어 문자의 초성/중성/종성 형태 선택
+- **문맥 치환**: 인접 글리프에 따른 조건부 치환
+
+### 6.3 GPOS — 글리프 배치
+
+`GPOS`(Glyph Positioning) 테이블은 글리프의 **위치를 조정**한다[^2]:
+
+- **커닝(kerning)**: `AV`처럼 특정 글리프 쌍 사이의 간격 조정
+- **마크 배치(mark positioning)**: 악센트 기호를 기본 글리프 위에 정확히 배치
+- **문맥 배치**: 주변 글리프에 따른 위치 조정
+
+### 6.4 HarfBuzz
+
+**HarfBuzz**는 사실상 표준인 오픈소스 텍스트 셰이핑 엔진이다[^4]. Chrome, Firefox, Android, GNOME, LibreOffice 등에서 사용된다.
+
+HarfBuzz의 셰이핑 과정:
+
+1. **스크립트/언어 감지**: 입력 텍스트의 유니코드 속성으로 스크립트 결정
+2. **초기 매핑**: `cmap`으로 글리프 ID 할당
+3. **GSUB 적용**: 스크립트별 필수 피처(예: 아랍어의 `init`, `medi`, `fina`) → 선택 피처(예: `liga`, `kern`)
+4. **GPOS 적용**: 커닝, 마크 배치 등
+5. **출력**: 글리프 ID + x/y 오프셋 + advance width의 배열
+
+### 6.5 복잡한 스크립트
+
+라틴 알파벳은 상대적으로 단순하다 — 대부분 1:1 매핑에 커닝 정도만 필요하다. 그러나 다른 스크립트들은 훨씬 복잡한 처리를 요구한다:
+
+**아랍어**: 같은 문자가 단어 내 위치(초성/중성/종성/독립)에 따라 최대 4가지 형태로 바뀐다. 오른쪽에서 왼쪽(RTL)으로 쓰인다. 리거쳐도 빈번하다.
+
+**데바나가리**: 자음 클러스터가 결합하여 복잡한 합자를 형성한다. "반 형태(half form)", 라(reph), 하란트(halant) 등 다양한 규칙이 있다.
+
+**한국어**: 자모를 음절 단위로 조합한다. 현대 한국어 폰트는 보통 조합 완성형 글리프(U+AC00~U+D7A3)를 직접 포함하므로 셰이핑이 단순하지만, 옛한글이나 자모 조합형에서는 복잡한 셰이핑이 필요하다.
+
+## 7. GPU 폰트 렌더링
+
+전통적인 CPU 래스터화는 각 글리프를 비트맵으로 만들어 텍스처에 캐시하고 GPU로 전송하는 방식이다. 이 방식은 잘 작동하지만, 글리프 크기마다 별도의 비트맵이 필요하고, 확대하면 흐려진다. GPU 네이티브 폰트 렌더링은 이 한계를 넘어서려는 시도들이다.
+
+### 7.1 SDF — Signed Distance Field
+
+2007년 Valve의 Chris Green이 SIGGRAPH에서 발표한 기법이다[^5]. 핵심 아이디어:
+
+1. 글리프 윤곽선에서 **부호 있는 거리 필드(SDF)**를 미리 계산한다 — 각 텍셀에 "가장 가까운 윤곽선까지의 거리"를 저장하되, 내부는 양수, 외부는 음수(또는 그 반대)
+2. 렌더링 시 텍스처를 샘플링하고, 거리 값이 0인 등고선(isoline)이 글리프의 윤곽선이 된다
+3. GPU의 바이리니어 보간이 자동으로 부드러운 경계를 만들어준다
+
+장점:
+- 하나의 저해상도 텍스처로 **다양한 크기**에서 선명한 렌더링
+- 외곽선, 그림자, 글로우 등의 **효과를 셰이더에서 저렴하게** 구현 가능
+- 텍스처 아틀라스 크기가 비트맵 대비 매우 작음
+
+단점:
+- **날카로운 코너가 둥글어짐** — 단일 스칼라 거리 값으로는 코너를 정확히 표현할 수 없다
+- 매우 작은 크기에서 디테일 손실
+- 미리 SDF 텍스처를 생성해야 함
+
+### 7.2 MSDF — Multi-channel Signed Distance Field
+
+Viktor Chlumský가 2015년 석사 논문에서 제안한 개선 방식이다[^6]. 윤곽선을 색상별로 분해하여 R, G, B **세 채널에 각각 다른 거리 필드**를 저장한다. 세 채널의 중간값(median)을 취하면 날카로운 코너를 정확히 복원할 수 있다.
+
+<Math display expr='d_"final" = "median"(d_R, d_G, d_B)' />
+
+MSDF는 SDF의 장점을 유지하면서 코너 품질을 크게 개선한다. 게임 엔진과 UI 프레임워크에서 널리 채택되었다.
+
+### 7.3 직접 래스터화: Slug과 font-rs
+
+SDF 계열과 다른 접근은 GPU에서 **벡터 곡선을 직접 래스터화**하는 것이다.
+
+**Slug** (Eric Lengyel): GPU 컴퓨트 셰이더에서 베지어 곡선을 직접 평가하여 픽셀별 커버리지를 계산한다. 텍스처 캐시 없이 임의의 크기에서 완벽한 품질을 제공하며, 최신 GPU에서 매우 빠르다.
+
+**Raph Levien의 접근**: `font-rs`와 후속 작업에서 컴퓨트 셰이더 기반 래스터화를 탐구했다[^7]. 윤곽선을 타일 단위로 분할하고, 각 타일의 커버리지를 병렬로 계산하는 방식이다. 이 연구는 Google의 Vello(2D 렌더러)로 이어졌다.
+
+## 8. 실제 스택
+
+### 8.1 FreeType
+
+FreeType은 가장 널리 사용되는 오픈소스 폰트 래스터화 라이브러리다[^3]. 주요 소스 구조:
+
+| 디렉토리 | 역할 |
+|---|---|
+| `src/truetype/` | TrueType 인터프리터 (힌팅 바이트코드 VM) |
+| `src/cff/` | CFF/CFF2 드라이버 |
+| `src/smooth/` | 안티앨리어싱 래스터라이저 (`ftgrays.c`) |
+| `src/autofit/` | 자동 힌터 |
+| `src/sfnt/` | SFNT 테이블 파싱 (cmap, head, hmtx 등) |
+| `src/psaux/` | PostScript 인터프리터 보조 코드 |
+
+FreeType의 API 사용 흐름:
+
+```c filename="freetype-usage.c"
+FT_Library library;
+FT_Face face;
+
+FT_Init_FreeType(&library);
+FT_New_Face(library, "font.ttf", 0, &face);
+FT_Set_Pixel_Sizes(face, 0, 16);            // 16px
+
+FT_Load_Glyph(face, glyph_index, FT_LOAD_DEFAULT);  // 로드 + 힌팅
+FT_Render_Glyph(face->glyph, FT_RENDER_MODE_NORMAL); // 래스터화
+
+// face->glyph->bitmap 에 8비트 그레이스케일 비트맵
+```
+
+### 8.2 HarfBuzz
+
+HarfBuzz의 셰이핑 API[^4]:
+
+```c filename="harfbuzz-usage.c"
+hb_font_t *font = hb_ft_font_create(ft_face, NULL);
+hb_buffer_t *buf = hb_buffer_create();
+
+hb_buffer_add_utf8(buf, "ffi", -1, 0, -1);
+hb_buffer_set_direction(buf, HB_DIRECTION_LTR);
+hb_buffer_set_script(buf, HB_SCRIPT_LATIN);
+
+hb_shape(font, buf, NULL, 0);  // 셰이핑 수행
+
+unsigned int count;
+hb_glyph_info_t *info = hb_buffer_get_glyph_infos(buf, &count);
+hb_glyph_position_t *pos = hb_buffer_get_glyph_positions(buf, &count);
+
+// info[i].codepoint → 글리프 ID
+// pos[i].x_advance, pos[i].x_offset → 배치 정보
+```
+
+`hb_shape()` 호출 하나에 GSUB/GPOS 전체 파이프라인이 실행된다. 입력의 `"ffi"`가 리거쳐 피처에 의해 단일 `ffi` 합자 글리프로 치환될 수 있다.
+
+### 8.3 브라우저: Skia의 텍스트 렌더링
+
+Chrome과 Android의 2D 그래픽 엔진인 **Skia**는 다음과 같은 텍스트 렌더링 경로를 거친다:
+
+1. **Blink (렌더 엔진)**: CSS 스타일을 해석하여 폰트 선택, 크기, weight 등을 결정
+2. **HarfBuzz**: 텍스트 셰이핑 — 글리프 선택과 배치
+3. **FreeType** (Linux/Android) 또는 **CoreText** (macOS) 또는 **DirectWrite** (Windows): 각 글리프를 래스터화
+4. **Skia**: 래스터화된 글리프를 글리프 캐시(`SkStrike`)에 저장하고, GPU 텍스처 아틀라스로 관리
+5. **GPU 합성**: 텍스처 아틀라스에서 글리프를 샘플링하여 최종 화면에 합성
+
+Skia의 글리프 캐시는 `(font, size, subpixel position, hints)` 튜플을 키로 사용한다. 서브픽셀 포지셔닝이 활성화되면 같은 글리프라도 서브픽셀 위치에 따라 다른 비트맵이 캐시된다.
+
+## 정리
+
+폰트 렌더링은 수학(베지어 곡선), 저수준 시스템 프로그래밍(바이트코드 VM, 래스터라이저), 지각 심리학(감마 보정, 서브픽셀 활용), 언어학(복잡한 스크립트 셰이핑), GPU 프로그래밍(SDF, 컴퓨트 셰이더)이 교차하는 영역이다.
+
+현대의 텍스트 렌더링 파이프라인을 요약하면:
+
+1. **폰트 파싱**: SFNT 테이블 구조에서 윤곽선 데이터와 메트릭을 추출
+2. **텍스트 셰이핑** (HarfBuzz): 유니코드 문자열 → (글리프 ID, 위치) 배열
+3. **힌팅**: 저해상도에서 윤곽선을 픽셀 그리드에 정합
+4. **래스터화**: 힌팅된 윤곽선을 커버리지 비트맵으로 변환
+5. **안티앨리어싱**: 그레이스케일 또는 서브픽셀 렌더링으로 경계를 부드럽게
+6. **합성**: 캐시된 글리프 비트맵을 화면에 배치
+
+고해상도 디스플레이의 보편화로 힌팅과 서브픽셀 렌더링의 중요성은 줄어들고 있다. Apple은 macOS에서 서브픽셀 AA를 2018년(Mojave)에 제거했고, 많은 Linux 배포판도 기본적으로 힌팅을 약하게 설정한다. 반면 GPU 직접 래스터화 기술은 게임, VR, 동적 UI 등에서 점점 더 중요해지고 있다.
+
+---
+
+[^1]: Apple, "TrueType Reference Manual," https://developer.apple.com/fonts/TrueType-Reference-Manual/
+[^2]: Microsoft, "OpenType Specification," https://learn.microsoft.com/en-us/typography/opentype/spec/
+[^3]: FreeType Project, "FreeType Documentation," https://freetype.org/freetype2/docs/
+[^4]: HarfBuzz, "HarfBuzz Documentation," https://harfbuzz.github.io/
+[^5]: Chris Green, "Improved Alpha-Tested Magnification for Vector Textures and Special Effects," SIGGRAPH 2007.
+[^6]: Viktor Chlumský, "Shape Decomposition for Multi-channel Distance Fields," Master's thesis, Czech Technical University in Prague, 2015.
+[^7]: Raph Levien, "font-rs," https://github.com/raphlinus/font-rs — GPU-friendly rasterization explorations.
+[^8]: Beat Stamm, "Implementing Sub-Pixel Rendering," https://www.beatstamm.com/typography/RTRCh4.htm
