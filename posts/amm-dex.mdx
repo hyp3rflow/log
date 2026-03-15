@@ -205,6 +205,57 @@ DEX 트레이딩의 가장 심각한 구조적 문제는 MEV(Maximal Extractable
 
 Flashbots는 MEV 문제에 대한 대응으로 등장했다(Daian et al., "Flash Boys 2.0", 2019에서 문제를 정의). Flashbots는 MEV-Boost를 통해 블록 빌더(builder)와 검증자(proposer) 간의 시장을 형성하고, MEV를 투명하게 추출·분배한다. 트랜잭션을 공개 멤풀 대신 프라이빗 채널로 전송하여 샌드위치 공격을 방지하는 Flashbots Protect 같은 도구도 제공한다.
 
+## CoW Protocol — Intent 기반 DEX 어그리게이터
+
+### AMM과의 관계
+
+CoW Protocol[^6]은 AMM 자체가 아니다. AMM(Uniswap, Curve 등)을 **유동성 소스로 활용하는 상위 레이어**다. 사용자는 AMM과 직접 상호작용하지 않고, **intent(의도)**를 제출한다. Solver가 최적의 실행 경로를 찾아 대신 체결한다.
+
+### 동작 원리
+
+1. **Intent 제출**: 사용자가 "1 ETH를 USDC로 바꾸고 싶다"는 서명된 메시지를 오프체인으로 제출한다. 온체인 트랜잭션이 아니므로 가스비가 없다.
+2. **배치 수집**: 일정 시간(현재 ~30초) 동안 여러 사용자의 intent를 모은다.
+3. **Solver 경쟁**: 여러 solver가 배치 내 주문들의 최적 실행 경로를 경쟁적으로 제안한다. Solver는 Uniswap, Curve, Balancer 등 온체인 유동성을 탐색하고, 배치 내 주문 간 직접 매칭도 시도한다.
+4. **낙찰 및 실행**: 사용자에게 가장 유리한 가격을 제시한 solver가 선택되어 온체인에서 실행한다.
+
+### Coincidence of Wants (CoW)
+
+프로토콜 이름의 핵심이다. 배치 내에서 반대 방향의 주문이 있으면 **P2P로 직접 매칭**한다:
+
+- 트레이더 A: 1 ETH → USDC
+- 트레이더 B: 3,000 USDC → ETH
+
+이 두 주문은 AMM 풀을 거치지 않고 직접 교환된다. LP 수수료도, AMM 슬리피지도 없다. 가스비도 줄어든다 — AMM 컨트랙트와 상호작용할 필요가 없기 때문이다.
+
+CoW의 유형:
+- **Simple**: 두 트레이더의 직접 매칭
+- **Batching**: 같은 방향 주문을 묶어 AMM에 한 번에 실행 (가스 절감)
+- **Ring**: 3개 이상 토큰/트레이더 간 순환 매칭 (A→B, B→C, C→A)
+
+### MEV 보호
+
+CoW Protocol은 구조적으로 MEV를 방어한다:
+
+- **오프체인 intent**: 사용자의 주문이 public mempool에 노출되지 않는다. 샌드위치 공격의 전제 조건(mempool에서 주문 감지)이 성립하지 않는다.
+- **배치 옥션**: 배치 내 모든 주문이 **단일 가격(Uniform Clearing Price)**에 체결된다. 주문 순서가 의미 없으므로 프론트러닝이 불가능하다.
+- **Solver 경쟁**: Solver 간 경쟁이 사용자에게 유리한 가격을 보장한다. Solver가 MEV를 추출하면 다른 solver가 더 좋은 가격을 제시하여 탈락시킨다.
+
+### AMM과의 보완 관계
+
+CoW Protocol은 AMM을 대체하는 것이 아니라 **보완**한다:
+
+| | AMM (Uniswap) | CoW Protocol |
+|---|---|---|
+| 역할 | 유동성 제공 | 주문 라우팅/매칭 |
+| 상호작용 | 사용자 → 풀 직접 | 사용자 → Intent → Solver → 풀 |
+| MEV 보호 | 없음 (슬리피지 허용치로만) | 구조적 보호 |
+| P2P 매칭 | 불가 | CoW로 가능 |
+| 가스비 | 사용자 부담 | Solver 부담 (수수료에 포함) |
+
+Solver가 Uniswap, Curve 등에서 유동성을 소싱하므로, AMM의 유동성이 깊을수록 CoW Protocol의 실행 품질도 좋아진다. 이런 의미에서 CoW는 AMM 생태계 위에 구축된 **인텐트 레이어(intent layer)**다.
+
+---
+
 ## 스마트 컨트랙트 구조 — Uniswap v2
 
 Uniswap v2의 컨트랙트 아키텍처는 Factory와 Pair로 구성된다.
@@ -297,3 +348,4 @@ AMM DEX는 주문장 없이 수학적 불변식만으로 토큰 교환을 가능
 - Uniswap v4 Documentation — https://docs.uniswapfoundation.org/
 - Hertzog, E., Benartzi, G., Benartzi, G. (2017). *Bancor Protocol* — https://about.bancor.network/
 - Daian, P., Goldfeder, S., Kell, T., et al. (2019). *Flash Boys 2.0: Frontrunning, Transaction Reordering, and Consensus Instability in Decentralized Exchanges* — https://arxiv.org/abs/1904.05234
+- CoW Protocol Documentation. *How CoW Protocol Works* — https://docs.cow.fi/cow-protocol/concepts/how-it-works
