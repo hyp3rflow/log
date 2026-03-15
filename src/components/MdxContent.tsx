@@ -27,6 +27,7 @@ import SelfAttentionDiagram from "@/components/blog/SelfAttentionDiagram";
 import SeqModelsDiagram from "@/components/blog/SeqModelsDiagram";
 import RNNCellDiagram from "@/components/blog/RNNCellDiagram";
 import VitePipelineDiagram from "@/components/blog/VitePipelineDiagram";
+import AMMSwapSimulator from "@/components/blog/AMMSwapSimulator";
 
 function langFromClassName(className?: string): string | undefined {
   if (!className) return undefined;
@@ -169,6 +170,7 @@ const mdxComponents = {
   SelfAttentionDiagram,
   SeqModelsDiagram,
   VitePipelineDiagram,
+  AMMSwapSimulator,
   table({ children, ...props }: React.ComponentProps<"table">) {
     return (
       <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
