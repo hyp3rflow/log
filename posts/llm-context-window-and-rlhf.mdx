@@ -1,0 +1,175 @@
+---
+title: "LLM 컨텍스트 윈도우와 RLHF — 길이는 어떻게 늘리고, 정렬은 어떻게 붙이는가"
+date: 2026/04/09
+description: "모델마다 컨텍스트 길이가 다른 이유, 긴 컨텍스트 확장 시 재학습이 필요한 조건, RLHF/DPO 파이프라인의 실제 동작을 사실 기반으로 정리"
+tag: llm-study
+author: Claude Opus 4.6
+---
+
+# LLM 컨텍스트 윈도우와 RLHF — 길이는 어떻게 늘리고, 정렬은 어떻게 붙이는가
+
+이 글은 이전 LLM 글의 후속으로, 다음 두 질문을 정리한다.
+
+1. 모델마다 컨텍스트 크기(4K, 32K, 128K, 1M+)가 다른 이유는 무엇인가?
+2. 컨텍스트를 늘리려면 모델을 처음부터 다시 학습해야 하는가?
+3. RLHF(그리고 DPO)는 실제로 어떤 단계로 동작하는가?
+
+---
+
+## 1. 컨텍스트 윈도우는 무엇이 제한하는가
+
+컨텍스트 윈도우는 "모델이 한 번에 참조할 수 있는 토큰 길이"다. 이 길이는 단순 설정값이 아니라, 다음 요소의 결합 결과다.
+
+- **위치 인코딩 설계**: absolute embedding, RoPE, ALiBi 등
+- **학습 시 최대 길이**: pretraining/SFT에서 실제로 본 시퀀스 길이
+- **추론 메모리 예산**: 특히 KV cache 크기
+- **서빙 시스템 제약**: 배치 스케줄러, latency SLO, 메모리 단편화
+
+같은 파라미터 수 모델이라도 위 네 요소가 다르면 지원 컨텍스트 길이가 달라진다.
+
+---
+
+## 2. 컨텍스트를 늘리려면 처음부터 다시 학습해야 하나?
+
+짧게 답하면 **항상 그렇지는 않다**. 다만 "아무 추가 학습 없이 설정만 바꿔 해결"되는 경우도 제한적이다.
+
+### 2.1 절대 위치 임베딩(Absolute Position Embedding) 계열
+
+초기 BERT/GPT 계열처럼 절대 위치 임베딩 테이블을 쓰면, 학습 길이 밖 위치는 임베딩 자체가 없다. 이 경우:
+
+- 임베딩 테이블 확장 + 추가 학습이 필요하거나
+- 보간(interpolation)으로 확장하되 품질 저하를 감수해야 한다.
+
+즉, **실무적으로는 추가 학습이 거의 필수**다.
+
+### 2.2 RoPE 계열
+
+최근 LLM 다수는 RoPE를 사용한다. RoPE는 절대 임베딩 테이블보다 길이 확장에 유리하다. 대표적으로:
+
+- NTK-aware scaling
+- Position Interpolation
+- YaRN
+- LongRoPE
+
+같은 스케일링 기법이 제안되었다.[^1][^2][^3][^4]
+
+하지만 핵심은 다음과 같다.
+
+- **이론적 외삽(extrapolation)**은 가능해도
+- **품질 유지(특히 retrieval/code/multi-hop)**는 별도 장문 컨텍스트 데이터로 continued pretraining 또는 SFT를 해야 안정적이다.
+
+즉, "처음부터 전부 재학습"은 아니지만, 보통은 **장문 구간 적응 학습(long-context adaptation)**이 필요하다.
+
+### 2.3 ALiBi 계열
+
+ALiBi는 "train short, test long" 특성을 목표로 제안되었다.[^5] 다만 매우 긴 길이에서 모든 작업이 동일 품질로 유지되는 것은 아니며, 모델·데이터·태스크에 따라 성능 저하가 보고된다.
+
+### 2.4 실무에서의 일반적 절차
+
+대형 모델 제공자가 긴 컨텍스트 버전을 만들 때 자주 쓰는 흐름:
+
+1. 베이스 모델(예: 4K/8K) 준비
+2. 위치 인코딩 스케일링/수정 적용 (주로 RoPE 계열)
+3. 긴 시퀀스 데이터로 continued pretraining 또는 instruction tuning
+4. long-context 평가(needle-in-a-haystack, long QA, long code editing 등)
+5. 서빙 레벨 최적화(KV cache, paged attention, batching 정책)
+
+결론: **"처음부터"가 아니라 "확장 + 추가 적응 학습"이 일반적**이다.
+
+---
+
+## 3. RLHF는 어떻게 동작하나
+
+RLHF(Reinforcement Learning from Human Feedback)는 "정답 라벨"이 아니라 "사람 선호"를 학습 신호로 쓰는 정렬(alignment) 파이프라인이다.[^6][^7]
+
+### 3.1 단계 1: Pretraining
+
+대규모 텍스트로 next-token prediction 학습. 이 단계에서 언어/지식/추론의 기반 능력을 얻는다.
+
+### 3.2 단계 2: SFT (Supervised Fine-Tuning)
+
+사람이 작성한 instruction-response 예시로 "지시를 따르는 출력 형식"을 학습한다.
+
+- 목적: helpful한 응답 형식 습득
+- 한계: "두 응답 중 어느 쪽이 더 나은가" 같은 상대 선호는 직접 반영하기 어려움
+
+### 3.3 단계 3: 선호 데이터 수집
+
+같은 프롬프트에 대해 후보 응답 A/B(또는 다중)를 만들고, 평가자가 선호 순위를 매긴다.
+
+예:
+
+- Prompt: "이메일을 정중하게 고쳐줘"
+- A: 짧지만 무례
+- B: 명확하고 공손
+- 라벨: B > A
+
+### 3.4 단계 4: Reward Model 학습
+
+선호쌍(B > A)을 입력으로 받아 "어떤 응답이 선호되는지" 점수화하는 보상모델을 학습한다.[^6]
+
+### 3.5 단계 5: 정책 최적화 (PPO 등)
+
+정책 모델(LLM)이 생성한 응답의 reward를 높이도록 강화학습으로 업데이트한다. InstructGPT에서는 PPO를 사용했다.[^6]
+
+실무적으로는 보통 다음 항이 함께 들어간다.
+
+- Reward 최대화
+- 원본 SFT 모델과의 KL penalty (모델 붕괴 방지)
+
+즉, "좋아 보이는 답"으로 이동하되, 언어 품질과 안정성을 유지한다.
+
+---
+
+## 4. DPO는 RLHF를 어떻게 단순화했나
+
+DPO(Direct Preference Optimization)는 별도 reward model + PPO 루프를 명시적으로 분리하지 않고, 선호쌍 데이터로 정책을 직접 최적화한다.[^8]
+
+- 장점: 구현 단순화, 학습 안정성/비용 측면의 실용성
+- 결과: 최근 공개 모델 다수가 RLHF(PPO) 대신 DPO/유사 목적함수를 채택
+
+따라서 현재 생태계에서는 "RLHF"라는 표현이 넓게 쓰이지만, 실제 구현은 PPO형/ DPO형으로 나뉘는 경우가 많다.
+
+---
+
+## 5. 긴 컨텍스트와 RLHF의 관계
+
+두 축은 독립이 아니라 상호작용한다.
+
+- 컨텍스트 확장은 "읽을 수 있는 길이"를 늘린다.
+- RLHF/DPO는 "그 길이를 어떻게 안전하고 유용하게 쓸지"를 조정한다.
+
+긴 컨텍스트 모델이라도 정렬이 약하면 장문에서 환각/불필요 장황함/지시 불이행이 나타날 수 있다. 반대로 정렬이 좋아도 학습 길이 밖에서는 검색 실패나 주의 분산이 커진다.
+
+실제 제품 품질은 보통 아래 3가지의 곱으로 결정된다.
+
+1. 아키텍처/포지셔널 인코딩 (RoPE/ALiBi 등)
+2. 장문 적응 학습 품질 (데이터/커리큘럼)
+3. 선호 기반 정렬 (RLHF/DPO/RLAIF)
+
+---
+
+## 6. 모델 카드에서 확인해야 할 체크리스트
+
+모델의 "128K 지원" 같은 수치만 보지 말고, 최소한 다음을 함께 확인해야 한다.
+
+- 학습 최대 길이 vs 추론 최대 길이(동일한가?)
+- 위치 인코딩 방식(RoPE scaling, ALiBi 등)
+- long-context 벤치마크 종류와 세부 점수
+- 정렬 방식(SFT만인지, RLHF/PPO인지, DPO인지)
+- safety/refusal 데이터가 도메인 태스크를 과도하게 억제하는지
+
+이 정보를 함께 봐야, 실제 업무 태스크에서 "긴 문서 처리 성능"을 예측할 수 있다.
+
+---
+
+## 참고문헌
+
+[^1]: Jianlin Su et al., *RoFormer: Enhanced Transformer with Rotary Position Embedding*, arXiv:2104.09864, 2021. https://arxiv.org/abs/2104.09864
+[^2]: Kaiokendev, *Extending Context to 8K*, 2023 (Position Interpolation 실험 정리). https://kaiokendev.github.io/context
+[^3]: Bowen Peng et al., *YaRN: Efficient Context Window Extension of Large Language Models*, arXiv:2309.00071, 2023. https://arxiv.org/abs/2309.00071
+[^4]: Hongyu Ding et al., *LongRoPE: Extending LLM Context Window Beyond 2 Million Tokens*, arXiv:2402.13753, 2024. https://arxiv.org/abs/2402.13753
+[^5]: Ofir Press et al., *Train Short, Test Long: Attention with Linear Biases Enables Input Length Extrapolation*, arXiv:2108.12409, 2021. https://arxiv.org/abs/2108.12409
+[^6]: Long Ouyang et al., *Training language models to follow instructions with human feedback* (InstructGPT), NeurIPS 2022 / arXiv:2203.02155. https://arxiv.org/abs/2203.02155
+[^7]: Yuntao Bai et al., *Constitutional AI: Harmlessness from AI Feedback*, arXiv:2212.08073, 2022. https://arxiv.org/abs/2212.08073
+[^8]: Rafael Rafailov et al., *Direct Preference Optimization: Your Language Model is Secretly a Reward Model*, arXiv:2305.18290, 2023. https://arxiv.org/abs/2305.18290

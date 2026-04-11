@@ -1,0 +1,170 @@
+---
+title: "OLTP vs OLAP — 트랜잭션 데이터베이스와 분석 데이터베이스의 분기점, 그리고 DuckDB"
+date: 2026/04/11
+description: "OLTP와 OLAP의 차이를 워크로드, 저장 엔진, 실행 엔진, 동시성 모델 관점에서 정리하고 DuckDB가 어디에 최적화되었는지 설명"
+tag: database, oltp, olap, duckdb
+author: Claude Opus 4.6
+---
+
+# OLTP vs OLAP — 트랜잭션 데이터베이스와 분석 데이터베이스의 분기점, 그리고 DuckDB
+
+"DB"라고 부르지만, 온라인 서비스의 주문 처리와 데이터 분석 대시보드는 전혀 다른 문제를 푼다.  
+이 글은 OLTP와 OLAP의 차이를 시스템 내부 관점에서 정리하고, 최근 많이 쓰이는 DuckDB가 왜 빠르게 채택되는지 연결해서 설명한다.
+
+---
+
+## 1. OLTP와 OLAP는 무엇이 다른가
+
+### OLTP (Online Transaction Processing)
+
+OLTP는 **짧고 빈번한 트랜잭션 처리**가 목표다.
+
+- 예: 결제 승인, 주문 생성, 재고 차감, 계정 이체
+- 특징: 작은 row 단위 read/write, 높은 동시성, 낮은 지연시간
+- 핵심 품질: ACID, 잠금/격리 수준, 장애 복구
+
+대표 시스템: PostgreSQL, MySQL, SQL Server, Oracle
+
+### OLAP (Online Analytical Processing)
+
+OLAP는 **대량 데이터 분석 쿼리**가 목표다.
+
+- 예: 월별 매출 집계, 퍼널 분석, 코호트 분석, 로그 탐색
+- 특징: 많은 row를 스캔해 집계/조인, 복잡한 SQL, 상대적으로 긴 쿼리
+- 핵심 품질: 스캔/집계 성능, 압축, 병렬 실행
+
+대표 시스템: DuckDB, ClickHouse, BigQuery, Snowflake, Redshift
+
+---
+
+## 2. 왜 같은 SQL인데 성능 특성이 반대로 나오나
+
+핵심은 **저장 방식 + 실행 엔진 + 동시성 모델**이 다르기 때문이다.
+
+### 2.1 Row Store vs Column Store
+
+OLTP는 보통 row store를 사용한다.
+
+- 한 row를 통째로 읽고 쓰는 작업에 유리
+- `UPDATE users SET last_login_at = now() WHERE id = ?` 같은 쿼리에 최적
+
+OLAP는 보통 column store를 사용한다.
+
+- 분석에 필요한 열만 읽을 수 있음
+- `SUM(amount)` 집계 시 `amount` 열만 스캔하면 되어 I/O 절감
+- 컬럼 압축 효율도 높아짐
+
+### 2.2 실행 엔진 차이
+
+현대 OLAP 엔진은 대체로 **vectorized execution**을 사용한다.
+
+- 한 tuple씩 처리하는 대신, 고정 크기 벡터(배치) 단위로 처리
+- CPU cache locality와 SIMD 활용이 좋아짐
+- 대량 스캔/집계에서 처리량이 크게 향상됨
+
+### 2.3 동시성/트랜잭션 우선순위 차이
+
+OLTP는 수많은 write 트랜잭션의 충돌을 안전하게 다뤄야 한다.
+
+- 잠금, MVCC, deadlock 처리, WAL/복구가 핵심
+
+OLAP는 읽기 중심(append-heavy) 환경이 많다.
+
+- 강한 write 동시성보다 읽기 처리량과 계획 최적화가 우선
+
+---
+
+## 3. DuckDB는 어디에 최적화된 DB인가
+
+DuckDB는 한 문장으로 요약하면 **"임베디드 OLAP 데이터베이스"**다.
+
+### 3.1 임베디드(Embedded)
+
+DuckDB는 서버-클라이언트형 DB가 아니라, 애플리케이션 프로세스에 링크해서 쓴다.
+
+- 별도 DB 서버 상시 운영이 필요 없음
+- Python/R/Node 앱 안에서 바로 SQL 실행
+- 로컬 분석, 실험, 배치 파이프라인에 적합
+
+이 점에서 SQLite와 비슷해 보이지만, 목표 워크로드가 다르다.
+
+- SQLite: 임베디드 OLTP 성향
+- DuckDB: 임베디드 OLAP 성향
+
+### 3.2 컬럼 지향 + 벡터화 실행
+
+DuckDB는 분석 쿼리에 맞춘 컬럼 지향 저장/실행 전략을 가진다.
+
+- 컬럼 단위 스캔과 압축
+- 벡터화 파이프라인 실행
+- 대량 집계/조인에서 높은 처리량
+
+### 3.3 파일 직접 분석(특히 Parquet)
+
+DuckDB는 CSV/Parquet 같은 파일을 외부 테이블처럼 바로 읽어 쿼리할 수 있다.
+
+- 데이터 웨어하우스 적재 전 탐색/검증에 유리
+- 데이터 과학 워크플로우(Pandas/Polars)와 결합이 쉬움
+
+### 3.4 트랜잭션 지원과 한계
+
+DuckDB도 ACID 트랜잭션을 지원하지만, 주 타깃은 대규모 다중 사용자 OLTP 서버가 아니다.
+
+- 로컬 분석/ETL/배치에 강함
+- 고동시성 write 트랜잭션 백엔드 주DB 용도와는 지향점이 다름
+
+---
+
+## 4. 언제 OLTP DB를 쓰고, 언제 DuckDB/OLAP를 쓰나
+
+실무에서 가장 흔한 선택은 다음과 같다.
+
+1. **서비스 시스템 오브 레코드**
+   - 선택: PostgreSQL/MySQL
+   - 이유: 트랜잭션 무결성, 동시성 write, 운영 생태계
+
+2. **분석/리포트/탐색 쿼리**
+   - 선택: DuckDB(로컬/임베디드) 또는 ClickHouse/BigQuery/Snowflake(서버/클라우드)
+   - 이유: 대량 스캔·집계 성능, 분석 함수, 컬럼 지향 최적화
+
+3. **하이브리드 구성(가장 일반적)**
+   - 운영 데이터는 OLTP DB에 저장
+   - 분석은 CDC/배치로 OLAP 측으로 전달
+
+즉, "하나의 만능 DB"보다는 워크로드 분리를 통해 전체 성능과 안정성을 확보한다.
+
+---
+
+## 5. DuckDB를 도입할 때 체크할 질문
+
+DuckDB가 맞는지 판단할 때는 아래 질문이 빠르다.
+
+- 다수 사용자가 동시에 write하는 운영 트랜잭션 시스템인가?
+- 데이터 소스가 Parquet/CSV 중심 분석 파이프라인인가?
+- 서버형 DB 운영 복잡도를 줄이고 싶은가?
+- 주 쿼리가 point lookup보다 scan/aggregate/join 중심인가?
+- Python/R/노트북에서 즉시 분석이 중요한가?
+
+"예"가 많을수록 DuckDB 적합도가 높다.
+
+---
+
+## 6. 정리
+
+OLTP와 OLAP의 차이는 SQL 문법의 차이가 아니라 **시스템 설계 목표의 차이**다.
+
+- OLTP: 짧은 트랜잭션, 높은 동시성, 강한 무결성
+- OLAP: 대량 스캔, 집계 중심, 처리량 최적화
+- DuckDB: 임베디드 OLAP라는 포지션에서 로컬 분석/파일 기반 분석 워크플로우를 강하게 지원
+
+따라서 DuckDB는 PostgreSQL의 대체재라기보다, **서로 다른 계층에서 함께 쓰는 보완재**로 보는 편이 정확하다.
+
+---
+
+## 참고문헌
+
+[^1]: Michael Stonebraker et al., *C-Store: A Column-oriented DBMS*, VLDB 2005. http://www.vldb.org/conf/2005/p553-stonebraker.pdf
+[^2]: Peter A. Boncz, Marcin Zukowski, Niels Nes, *MonetDB/X100: Hyper-Pipelining Query Execution*, CIDR 2005. https://www.cidrdb.org/cidr2005/papers/P19.pdf
+[^3]: DuckDB Labs, *DuckDB: an Embeddable Analytical Database* (CIDR 2020). https://duckdb.org/why_duckdb
+[^4]: DuckDB Documentation, *Concurrency / Storage / Execution internals*. https://duckdb.org/docs/
+[^5]: Daniel J. Abadi et al., *Column-Stores vs Row-Stores: How Different Are They Really?*, SIGMOD 2008. https://dl.acm.org/doi/10.1145/1376616.1376712
